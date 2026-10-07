@@ -1,7 +1,7 @@
 // comma four style layout, extended for a larger screen
 //
 // follows the comma four's own driving screen (openpilot selfdrive/ui/mici/onroad)
-// as it appears in device-screen clips: the camera fills the screen inside a thick
+// as it appears in device-screen clips: the camera fills the screen inside a
 // rounded border in the engagement colour, with
 //   - driver monitoring icon, top left
 //   - speed in a dark pill, top centre
@@ -34,22 +34,13 @@ import 'package:opview/services/app_settings.dart';
 
 const miciScreenWidth = 536.0;
 const miciScreenHeight = 240.0;
-const miciCornerRadius = 24.0;   // rounded border, roundness 0.2 of a 240 px side
-const miciBorderWidth = 8.0;
+const miciCornerRadius = 12.0;   // the device's is 24; halved for a large screen
+const miciBorderWidth = 4.0;
 const miciBallRadius = 22.0;
 const miciWheelSize = 50.0;
 const miciDriverIconSize = 54.0;
 const miciSpeedPillHeight = 52.0;
 const miciMargin = 16.0;         // gap between the border and the corner elements
-
-/// zoom of the comma four's own screen, in screen px per camera px on its 240 px
-/// tall display with its OS04C10 cameras (augmented_road_view.py _calc_frame_matrix)
-const miciWideZoom = 0.7 * 1.5;
-double miciRoadZoom(double vEgo) => _interp(vEgo, 10, 30, 0.8, 1.0);
-
-/// focal lengths the zooms above were chosen for
-const miciRoadFocalLength = 1141.5;
-const miciWideFocalLength = 425.25;
 
 // torque_bar.py
 const _torqueAngleSpanDeg = 12.7;
@@ -105,22 +96,14 @@ Color miciDriverArcColor({required bool faceDetected, required bool distracted})
 /// comma four pixel size on a screen: its 536x240 display scaled to fit inside
 double miciUnit(Size screen) => min(screen.height / miciScreenHeight, screen.width / miciScreenWidth);
 
-/// video placement and overlay transform for a camera view of [w] x [h];
-/// zooms are the comma four's own, [scale] is the comma four pixel size
-typedef MiciFrameBuilder = FrameTransform Function(
-  double w,
-  double h, {
-  required double roadZoom,
-  required double wideZoom,
-  required double scale,
-});
-
 // -- layout --
 
 class MiciExtendedLayout extends StatelessWidget {
   final UIState uiState;
   final ClockMode clockMode;
-  final MiciFrameBuilder frameFor;
+  /// where the camera image goes and the matching overlay transform, for the whole
+  /// screen; the same framing as the Classic layout
+  final FrameTransform Function(double w, double h) frameFor;
   final Widget Function(FrameTransform frame) videoBuilder;
 
   const MiciExtendedLayout({
@@ -140,13 +123,7 @@ class MiciExtendedLayout extends StatelessWidget {
       final radius = BorderRadius.circular(miciCornerRadius * unit);
       final edge = (miciBorderWidth + miciMargin) * unit;  // screen edge to corner elements
 
-      final frame = frameFor(
-        w,
-        h,
-        roadZoom: miciRoadZoom(st.vEgo),
-        wideZoom: miciWideZoom,
-        scale: unit,
-      );
+      final frame = frameFor(w, h);
 
       // alerts and turn signals are the Classic ones
       final classicScale = h / 1080.0;
@@ -287,7 +264,7 @@ class MiciExtendedLayout extends StatelessWidget {
 
             AlertRenderer(uiState: st, scale: classicScale),
 
-            // thick border in the engagement colour, on top of everything
+            // border in the engagement colour, on top of everything
             DecoratedBox(
               decoration: BoxDecoration(
                 borderRadius: radius,

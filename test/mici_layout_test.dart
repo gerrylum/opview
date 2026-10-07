@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:opview/common/transformations.dart';
 import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/mici/mici_extended_layout.dart';
@@ -31,13 +32,6 @@ void main() {
     // wide screens are limited by height, tall ones by width
     expect(miciUnit(const Size(1920, 720)), closeTo(3.0, 1e-9));
     expect(miciUnit(const Size(1024, 768)), closeTo(1024 / 536, 1e-9));
-  });
-
-  test('road zoom follows speed as on the device', () {
-    expect(miciRoadZoom(0), 0.8);
-    expect(miciRoadZoom(10), 0.8);
-    expect(miciRoadZoom(20), closeTo(0.9, 1e-9));
-    expect(miciRoadZoom(40), 1.0);
   });
 
   group('torqueBarValue', () {
@@ -140,6 +134,21 @@ void main() {
   });
 
   group('MiciExtendedLayout', () {
+    test('the camera framing is the Classic one, without the border inset', () {
+      // Classic at 1920x1080: zoom 1.1 inside a 30 px border
+      final tici = deviceCameras[('tici', 'ar0231')]!.fcam;
+      final classic = calcFrameTransform(
+        camera: tici, calibration: viewFrameFromDeviceFrame, deviceZoom: 1.1, scale: 1.0,
+        x: 30, y: 30, w: 1860, h: 1020,
+      );
+      final full = calcFrameTransform(
+        camera: tici, calibration: viewFrameFromDeviceFrame, deviceZoom: 1.1, scale: 1.0,
+        x: 0, y: 0, w: 1920, h: 1080,
+      );
+      expect(full.zoom, closeTo(classic.zoom, 1e-9));
+      expect(full.videoWidth, closeTo(classic.videoWidth, 1e-6));
+    });
+
     testWidgets('the camera view fills the whole screen and the speed is centred', (tester) async {
       _screen(tester, 1920, 1080);
       await tester.pumpWidget(MaterialApp(

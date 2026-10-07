@@ -107,7 +107,7 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
                 MiciExtendedLayout(
                   uiState: widget.uiState,
                   clockMode: clockMode,
-                  frameFor: _miciFrame,
+                  frameFor: _fullScreenFrame,
                   videoBuilder: _videoLayer,
                 )
               else ...[
@@ -310,27 +310,16 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
     );
   }
 
-  /// video placement and overlay transform for the comma four style layout's camera
-  /// view. The zooms are the comma four's own, chosen for its cameras, so they are
-  /// rescaled by focal length to give the same view from a comma 3X camera
-  FrameTransform _miciFrame(
-    double w,
-    double h, {
-    required double roadZoom,
-    required double wideZoom,
-    required double scale,
-  }) {
+  /// the Classic framing (zoom 1.1 road, 2.0 wide on a 1080 px tall screen) over the
+  /// whole screen with no border inset, for layouts that draw their own border
+  FrameTransform _fullScreenFrame(double w, double h) {
     final isWideCamera = widget.uiState.streamType == 'wideRoad';
     final deviceCamera = _lookupCamera();
-    final camera = isWideCamera ? deviceCamera.ecam : deviceCamera.fcam;
-    final zoom = isWideCamera
-        ? wideZoom * miciWideFocalLength / camera.focalLength
-        : roadZoom * miciRoadFocalLength / camera.focalLength;
     return calcFrameTransform(
-      camera: camera,
+      camera: isWideCamera ? deviceCamera.ecam : deviceCamera.fcam,
       calibration: isWideCamera ? _computeWideViewFromCalib() : _computeViewFromCalib(),
-      deviceZoom: zoom,
-      scale: scale,
+      deviceZoom: isWideCamera ? 2.0 : 1.1,
+      scale: h / 1080.0,
       x: 0,
       y: 0,
       w: w,
