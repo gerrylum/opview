@@ -20,15 +20,30 @@ String clockModeLabel(ClockMode mode) {
   }
 }
 
+/// which driving display to draw
+enum OnroadLayout { classic, miciExtended }
+
+String onroadLayoutLabel(OnroadLayout layout) {
+  switch (layout) {
+    case OnroadLayout.classic:
+      return 'Classic (comma 3X style)';
+    case OnroadLayout.miciExtended:
+      return 'comma four style, extended';
+  }
+}
+
 const _clockModeKey = 'clock_mode';
+const _layoutKey = 'onroad_layout';
 
 class AppSettings extends ChangeNotifier {
   ClockMode clockMode = ClockMode.off;
+  OnroadLayout layout = OnroadLayout.classic;
 
   /// read saved settings; unknown or missing values keep the defaults
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     clockMode = _byName(ClockMode.values, prefs.getString(_clockModeKey), ClockMode.off);
+    layout = _byName(OnroadLayout.values, prefs.getString(_layoutKey), OnroadLayout.classic);
     notifyListeners();
   }
 
@@ -38,6 +53,14 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_clockModeKey, mode.name);
+  }
+
+  Future<void> setLayout(OnroadLayout value) async {
+    if (value == layout) return;
+    layout = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_layoutKey, value.name);
   }
 }
 

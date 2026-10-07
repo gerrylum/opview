@@ -16,6 +16,7 @@ import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/alert_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
+import 'package:opview/selfdrive/ui/onroad/mici/mici_extended_layout.dart';
 import 'package:opview/selfdrive/ui/settings/settings_dialog.dart';
 import 'package:opview/services/app_settings.dart';
 
@@ -91,6 +92,7 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
 
         final settings = widget.settings;
         final clockMode = settings?.clockMode ?? ClockMode.off;
+        final layout = settings?.layout ?? OnroadLayout.classic;
 
         return MediaQuery(
           data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
@@ -101,6 +103,14 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
             child: Stack(
             fit: StackFit.expand,
             children: [
+              if (layout == OnroadLayout.miciExtended)
+                MiciExtendedLayout(
+                  uiState: widget.uiState,
+                  clockMode: clockMode,
+                  frameFor: _miciFrame,
+                  videoBuilder: _videoLayer,
+                )
+              else ...[
               // layer 0 + 1a: video + model overlay
               _videoLayer(frame),
               ClipRect(
@@ -141,6 +151,7 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
                   borderSize: borderSize,
                 ),
               ),
+              ],
 
               // layer 3: connecting overlay with rolling status log
               if (!widget.uiState.isConnected)
@@ -296,6 +307,34 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
       y: border,
       w: screenW - 2 * border,
       h: screenH - 2 * border,
+    );
+  }
+
+  /// video placement and overlay transform for the comma four style layout's camera
+  /// view. The zooms are the comma four's own, chosen for its cameras, so they are
+  /// rescaled by focal length to give the same view from a comma 3X camera
+  FrameTransform _miciFrame(
+    double w,
+    double h, {
+    required double roadZoom,
+    required double wideZoom,
+    required double scale,
+  }) {
+    final isWideCamera = widget.uiState.streamType == 'wideRoad';
+    final deviceCamera = _lookupCamera();
+    final camera = isWideCamera ? deviceCamera.ecam : deviceCamera.fcam;
+    final zoom = isWideCamera
+        ? wideZoom * miciWideFocalLength / camera.focalLength
+        : roadZoom * miciRoadFocalLength / camera.focalLength;
+    return calcFrameTransform(
+      camera: camera,
+      calibration: isWideCamera ? _computeWideViewFromCalib() : _computeViewFromCalib(),
+      deviceZoom: zoom,
+      scale: scale,
+      x: 0,
+      y: 0,
+      w: w,
+      h: h,
     );
   }
 

@@ -19,6 +19,17 @@ Future<void> showSettingsDialog(BuildContext context, AppSettings settings) {
             children: [
               const Padding(
                 padding: EdgeInsets.only(left: 16, bottom: 4),
+                child: Text('Layout'),
+              ),
+              for (final layout in OnroadLayout.values)
+                ListTile(
+                  dense: true,
+                  title: Text(onroadLayoutLabel(layout)),
+                  trailing: settings.layout == layout ? const Icon(Icons.check) : null,
+                  onTap: () => settings.setLayout(layout),
+                ),
+              const Padding(
+                padding: EdgeInsets.only(left: 16, top: 12, bottom: 4),
                 child: Text('Clock'),
               ),
               for (final mode in ClockMode.values)

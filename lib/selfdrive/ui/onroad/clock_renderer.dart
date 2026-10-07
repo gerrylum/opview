@@ -18,7 +18,7 @@ String formatClock(DateTime t, {required bool use24Hour}) {
 }
 
 /// top right, to the left of the experimental mode button
-class ClockRenderer extends StatefulWidget {
+class ClockRenderer extends StatelessWidget {
   final ClockMode mode;
   final double scale;
 
@@ -28,10 +28,40 @@ class ClockRenderer extends StatefulWidget {
   const ClockRenderer({super.key, required this.mode, required this.scale, this.now});
 
   @override
-  State<ClockRenderer> createState() => _ClockRendererState();
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: 45 * scale,
+      right: 252 * scale,
+      child: ClockText(
+        mode: mode,
+        now: now,
+        style: TextStyle(
+          color: const Color(0xC8FFFFFF),
+          fontSize: _fontClock * scale,
+          fontWeight: FontWeight.w600,
+          height: 1.0,
+          shadows: [Shadow(color: const Color(0x99000000), blurRadius: 8 * scale)],
+        ),
+      ),
+    );
+  }
 }
 
-class _ClockRendererState extends State<ClockRenderer> {
+/// the time as text, kept current by its own timer; placed by whichever layout uses it
+class ClockText extends StatefulWidget {
+  final ClockMode mode;
+  final TextStyle style;
+
+  /// time source, replaceable in tests
+  final DateTime Function()? now;
+
+  const ClockText({super.key, required this.mode, required this.style, this.now});
+
+  @override
+  State<ClockText> createState() => _ClockTextState();
+}
+
+class _ClockTextState extends State<ClockText> {
   Timer? _timer;
   bool _systemUses24Hour = true;
   String _shown = '';
@@ -67,20 +97,6 @@ class _ClockRendererState extends State<ClockRenderer> {
   @override
   Widget build(BuildContext context) {
     _shown = _text();
-    final scale = widget.scale;
-    return Positioned(
-      top: 45 * scale,
-      right: 252 * scale,
-      child: Text(
-        _shown,
-        style: TextStyle(
-          color: const Color(0xC8FFFFFF),
-          fontSize: _fontClock * scale,
-          fontWeight: FontWeight.w600,
-          height: 1.0,
-          shadows: [Shadow(color: const Color(0x99000000), blurRadius: 8 * scale)],
-        ),
-      ),
-    );
+    return Text(_shown, style: widget.style);
   }
 }

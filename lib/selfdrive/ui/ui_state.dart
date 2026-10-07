@@ -31,6 +31,9 @@ const rivianAngleHarnessFlag = 2;
 /// the device uses 10 frames at 100 Hz (0.1 s); webrtcd sends carOutput at 20 Hz for opview
 const zeroTorqueHold = 3;
 
+/// mici torque_bar.py DEFAULT_MAX_LAT_ACCEL, m/s^2
+const defaultMaxLatAccel = 3.0;
+
 /// how the wheel icon is tinted while MADS steers an angle-capable Rivian
 enum LateralMode { angle, torque }
 
@@ -46,6 +49,7 @@ class UIState extends ChangeNotifier {
   double vEgoCluster = 0.0;
   double vCruiseCluster = 0.0;
   bool vEgoClusterSeen = false;
+  double steeringAngleDeg = 0.0;
 
   // selfdriveState
   bool enabled = false;
@@ -59,6 +63,12 @@ class UIState extends ChangeNotifier {
 
   // controlsState
   double vCruiseDEPRECATED = 0.0;
+  double curvature = 0.0;
+  double desiredCurvature = 0.0;
+  String lateralControlKind = '';  // which lateralControlState is set, e.g. 'torqueState'
+
+  // carOutput.actuatorsOutput.torque, -1..1
+  double torqueOutput = 0.0;
 
   // modelV2 — raw lists from cereal
   List<double> pathX = [];
@@ -184,6 +194,7 @@ class UIState extends ChangeNotifier {
     vEgoCluster = (data['vEgoCluster'] as num?)?.toDouble() ?? 0.0;
     vCruiseCluster = (data['vCruiseCluster'] as num?)?.toDouble() ?? 0.0;
     if (!vEgoClusterSeen && vEgoCluster != 0.0) vEgoClusterSeen = true;
+    steeringAngleDeg = (data['steeringAngleDeg'] as num?)?.toDouble() ?? 0.0;
     final left = data['leftBlinker'] as bool? ?? false;
     final right = data['rightBlinker'] as bool? ?? false;
     if (left && !leftBlinker) leftSignalSince = DateTime.now();
@@ -213,6 +224,10 @@ class UIState extends ChangeNotifier {
 
   void applyControlsState(Map<String, dynamic> data) {
     vCruiseDEPRECATED = (data['vCruiseDEPRECATED'] as num?)?.toDouble() ?? 0.0;
+    curvature = (data['curvature'] as num?)?.toDouble() ?? 0.0;
+    desiredCurvature = (data['desiredCurvature'] as num?)?.toDouble() ?? 0.0;
+    final lat = data['lateralControlState'];
+    lateralControlKind = (lat is Map && lat.isNotEmpty) ? '${lat.keys.first}' : '';
     // no notify — picked up on next modelV2
   }
 
@@ -373,6 +388,8 @@ class UIState extends ChangeNotifier {
   /// lateral_mode.py: on an angle-capable Rivian while MADS steers, the car sends no CAN
   /// torque when it steers on its angle channel
   void applyCarOutput(Map<String, dynamic> data) {
+    final out = data['actuatorsOutput'];
+    torqueOutput = out is Map ? ((out['torque'] as num?)?.toDouble() ?? 0.0) : 0.0;
     final angleCapable = brand == 'rivian' && (carFlags & rivianAngleHarnessFlag) != 0;
     if (!angleCapable || !latActive) {
       lateralMode = null;
@@ -394,6 +411,18 @@ class UIState extends ChangeNotifier {
   }
 
   // -- derived values --
+
+  /// steering effort for the comma four style torque bar, -1..1 (mici torque_bar.py).
+  /// angle and curvature control have no torque, so the device estimates it from
+  /// lateral acceleration; it also removes road roll, which opview is not sent
+  double get torqueBarValue {
+    if (lateralControlKind == 'angleState' || lateralControlKind == 'curvatureState') {
+      if (!latActive) return 0.0;
+      final desiredLateralAccel = desiredCurvature * vEgo * vEgo;
+      return (desiredLateralAccel / defaultMaxLatAccel).clamp(-1.0, 1.0).toDouble();
+    }
+    return (-torqueOutput).clamp(-1.0, 1.0).toDouble();
+  }
 
   /// speed conversion for the current unit
   double get speedConv => isMetric ? msToKph : msToMph;
