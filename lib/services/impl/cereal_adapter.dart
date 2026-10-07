@@ -124,6 +124,9 @@ class CerealAdapter implements TelemetryAdapter {
       case 'selfdriveStateSP':
         state.applySelfdriveStateSP(data);
         return false;
+      case 'driverMonitoringState':
+        state.applyDriverMonitoringState(data);
+        return false;
       default:
         return false;
     }

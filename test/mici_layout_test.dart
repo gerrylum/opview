@@ -6,6 +6,7 @@ import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/mici/mici_extended_layout.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
+import 'package:opview/services/impl/cereal_adapter.dart';
 import 'package:opview/services/app_settings.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'golden/mock_ui_state.dart';
@@ -69,6 +70,21 @@ void main() {
     expect(s.steeringAngleDeg, -12.5);
   });
 
+  test('driver monitoring arc colour', () {
+    expect(miciDriverArcColor(faceDetected: true, distracted: false), const Color(0xFF17C653));
+    expect(miciDriverArcColor(faceDetected: true, distracted: true), const Color(0xFFFF7300));
+    expect(miciDriverArcColor(faceDetected: false, distracted: false), const Color(0xFF8C8C8C));
+  });
+
+  test('driver monitoring state is read through the adapter', () {
+    final s = UIState();
+    expect(s.dmSeen, false);
+    CerealAdapter().apply(s, '{"type": "driverMonitoringState", "data": {"faceDetected": true, "isDistracted": true}}');
+    expect(s.dmSeen, true);
+    expect(s.dmFaceDetected, true);
+    expect(s.dmDistracted, true);
+  });
+
   test('colours cover every engagement state', () {
     for (final status in UIStatus.values) {
       expect(miciBorderColor(status), isNotNull);
@@ -124,26 +140,26 @@ void main() {
   });
 
   group('MiciExtendedLayout', () {
-    testWidgets('the camera view fills the whole screen', (tester) async {
+    testWidgets('the camera view fills the whole screen and the speed is centred', (tester) async {
       _screen(tester, 1920, 1080);
       await tester.pumpWidget(MaterialApp(
         home: AugmentedRoadView(uiState: createMockUIState(), settings: _mici()),
       ));
       expect(tester.getSize(find.byType(MiciExtendedLayout)), const Size(1920, 1080));
-      // the information column lies inside it, on the right
-      final panel = tester.getRect(find.byType(MiciInfoPanel));
-      expect(panel.right, 1920);
-      expect(panel.top, 0);
-      expect(panel.width, closeTo(1920 * miciInfoWidthFraction, 0.01));
+      // 18 m/s is 64.8 km/h; the pill holding it is centred with or without MAX beside it
+      final speed = tester.getRect(find.text('65'));
+      final unit = tester.getRect(find.text('km/h'));
+      expect((speed.left + unit.right) / 2, closeTo(960, 1.0));
+      expect(speed.top, lessThan(1080 * 0.3));
     });
 
-    testWidgets('shows speed, set speed and unit in the information panel', (tester) async {
+    testWidgets('shows speed, unit and set speed in the top row', (tester) async {
       _screen(tester, 1920, 1080);
       // 18 m/s is 64.8 km/h; cruise set at 80
       await tester.pumpWidget(MaterialApp(
         home: AugmentedRoadView(uiState: createMockUIState(), settings: _mici()),
       ));
-      expect(find.byType(MiciInfoPanel), findsOneWidget);
+      expect(find.byType(MiciTopRow), findsOneWidget);
       expect(find.text('65'), findsOneWidget);
       expect(find.text('km/h'), findsOneWidget);
       expect(find.text('MAX'), findsOneWidget);
@@ -186,6 +202,18 @@ void main() {
       expect(find.text('mph'), findsOneWidget);
       expect(find.text('SPEED'), findsOneWidget);
       expect(find.text('40'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('driver monitoring icon appears once its data arrives, while active', (tester) async {
+      _screen(tester, 1920, 1080);
+      final state = createMockUIState();
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: state, settings: _mici())));
+      expect(find.byIcon(Icons.person), findsNothing);
+
+      state.applyDriverMonitoringState({'faceDetected': true, 'isDistracted': false});
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: state, settings: _mici())));
+      expect(find.byIcon(Icons.person), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 

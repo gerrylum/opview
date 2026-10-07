@@ -1,19 +1,22 @@
 // comma four style layout, extended for a larger screen
 //
-// the camera fills the whole screen and everything else is drawn over it. The
-// overlay follows the comma four's own driving screen (openpilot
-// selfdrive/ui/mici/onroad): the device's zoom, the steering wheel icon bottom
-// left, the torque bar along the bottom, a status ball, and a rounded border in
-// the engagement colour. The comma four shows no permanent speed, so a column on
-// the right adds what a larger screen has room for: clock, speed, set speed and
-// speed limit. The road name sits top centre.
+// follows the comma four's own driving screen (openpilot selfdrive/ui/mici/onroad)
+// as it appears in device-screen clips: the camera fills the screen inside a thick
+// rounded border in the engagement colour, with
+//   - driver monitoring icon, top left
+//   - speed in a dark pill, top centre
+//   - steering wheel icon, bottom left, turning with the steering angle
+//   - torque bar, bottom centre
+//   - status ball, bottom right
+// and, as extras for a larger screen, set speed and speed limit either side of the
+// speed pill, the road name under it, and the clock top right.
 //
 // device measurements are in comma four pixels (240 tall), scaled by `unit`.
 //
-// not ported yet: the device's own path and lane line style (the Classic overlay is
-// drawn instead), the driver monitoring face, the brief set speed pop-up, and the
-// confidence ball's rise and fall (opview is not sent the model's confidence values,
-// so the ball shows engagement state only, at a fixed place).
+// simplified or not ported yet: the device's own path and lane line style (the
+// Classic overlay is drawn instead); the driver monitoring icon shows attention
+// state only, not head pose; the status ball shows engagement state only, since
+// opview is not sent the model's confidence values.
 
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -24,7 +27,6 @@ import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/exp_button.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
-import 'package:opview/selfdrive/ui/onroad/road_name_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/speed_limit_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/turn_signal_renderer.dart';
 import 'package:opview/services/app_settings.dart';
@@ -33,9 +35,13 @@ import 'package:opview/services/app_settings.dart';
 
 const miciScreenWidth = 536.0;
 const miciScreenHeight = 240.0;
-const miciCornerRadius = 24.0;     // rounded border, roundness 0.2 of a 240 px side
-const miciBallRadius = 24.0;       // status_dot_radius
+const miciCornerRadius = 24.0;   // rounded border, roundness 0.2 of a 240 px side
+const miciBorderWidth = 8.0;
+const miciBallRadius = 22.0;
 const miciWheelSize = 50.0;
+const miciDriverIconSize = 54.0;
+const miciSpeedPillHeight = 52.0;
+const miciMargin = 16.0;         // gap between the border and the corner elements
 
 /// zoom of the comma four's own screen, in screen px per camera px on its 240 px
 /// tall display with its OS04C10 cameras (augmented_road_view.py _calc_frame_matrix)
@@ -52,7 +58,10 @@ const _torqueRadius = 1200.0;
 
 // -- colours --
 
-/// border around the camera view, by engagement state
+const _pillColor = Color(0xB3141414);
+const _discColor = Color(0xE6101010);
+
+/// border around the screen, by engagement state
 Color miciBorderColor(UIStatus status) {
   switch (status) {
     case UIStatus.disengaged:
@@ -62,7 +71,7 @@ Color miciBorderColor(UIStatus status) {
     case UIStatus.engaged:
       return const Color(0xFF17C653);  // green
     case UIStatus.latOnly:
-      return const Color(0xFF2E7BFF);  // blue: steering only
+      return const Color(0xFF4D9DFF);  // blue: steering only
     case UIStatus.longOnly:
       return const Color(0xFF961CA8);  // purple: cruise only
   }
@@ -78,20 +87,21 @@ List<Color>? miciBallColors(UIStatus status) {
     case UIStatus.override_:
       return const [Color(0xFFFFFFFF), Color(0xFF525252)];
     case UIStatus.latOnly:
-      return const [Color(0xFF00C8C8), Color(0xFF00C8C8)];
+      return const [Color(0xFF4D9DFF), Color(0xFF4D9DFF)];
     case UIStatus.longOnly:
       return const [Color(0xFF961CA8), Color(0xFF961CA8)];
   }
 }
 
+/// arc over the driver monitoring icon: green while attentive, orange when
+/// distracted, grey when no face is seen
+Color miciDriverArcColor({required bool faceDetected, required bool distracted}) {
+  if (distracted) return const Color(0xFFFF7300);
+  if (!faceDetected) return const Color(0xFF8C8C8C);
+  return const Color(0xFF17C653);
+}
+
 // -- geometry --
-
-/// share of the screen width used by the information column on the right
-const miciInfoWidthFraction = 0.2;
-
-/// share of the screen height used by the information column; the status ball
-/// sits in the corner below it
-const miciInfoHeightFraction = 0.78;
 
 /// comma four pixel size on a screen: its 536x240 display scaled to fit inside
 double miciUnit(Size screen) => min(screen.height / miciScreenHeight, screen.width / miciScreenWidth);
@@ -129,6 +139,7 @@ class MiciExtendedLayout extends StatelessWidget {
       final w = constraints.maxWidth, h = constraints.maxHeight;
       final unit = miciUnit(Size(w, h));
       final radius = BorderRadius.circular(miciCornerRadius * unit);
+      final edge = (miciBorderWidth + miciMargin) * unit;  // screen edge to corner elements
 
       final frame = frameFor(
         w,
@@ -138,11 +149,10 @@ class MiciExtendedLayout extends StatelessWidget {
         scale: unit,
       );
 
-      // alerts, turn signals and the road name are the Classic ones
+      // alerts and turn signals are the Classic ones
       final classicScale = h / 1080.0;
       final ball = miciBallColors(st.status);
-      final tint = wheelTint(st.lateralMode) ?? Colors.white;
-      final infoW = w * miciInfoWidthFraction;
+      final active = st.status != UIStatus.disengaged;
 
       return ClipRRect(
         borderRadius: radius,
@@ -176,69 +186,101 @@ class MiciExtendedLayout extends StatelessWidget {
               ),
             ),
 
-            // darken the right edge so the information column stays readable
-            Positioned(
-              top: 0,
-              bottom: 0,
-              right: 0,
-              width: infoW * 1.6,
-              child: const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                    colors: [Color(0x00000000), Color(0xA6000000)],
-                  ),
-                ),
-              ),
-            ),
-
             CustomPaint(
               painter: MiciTorqueBarPainter(value: st.torqueBarValue, status: st.status, unit: unit),
             ),
             Positioned.fill(child: TurnSignalRenderer(uiState: st, scale: classicScale)),
-            RoadNameRenderer(uiState: st, scale: classicScale),
 
-            // steering wheel
-            if (st.status != UIStatus.disengaged)
+            // top row: set speed | speed | speed limit, with the speed centred
+            Positioned(
+              top: edge,
+              left: 0,
+              right: 0,
+              height: miciSpeedPillHeight * unit,
+              child: MiciTopRow(uiState: st, unit: unit),
+            ),
+
+            // road name under the speed
+            if (st.showRoadName)
               Positioned(
-                left: 21 * unit,
-                bottom: 14 * unit,
-                width: miciWheelSize * unit,
-                height: miciWheelSize * unit,
-                child: Transform.rotate(
-                  angle: -st.steeringAngleDeg * pi / 180,
-                  child: Image.asset(
-                    'assets/icons/chffr_wheel.png',
-                    color: tint.withAlpha(230),
-                    colorBlendMode: BlendMode.modulate,
+                top: edge + (miciSpeedPillHeight + 6) * unit,
+                left: 0,
+                right: 0,
+                child: Center(child: _roadName(st.roadName, unit, w)),
+              ),
+
+            // driver monitoring, top left
+            if (active && st.dmSeen)
+              Positioned(
+                left: edge,
+                top: edge,
+                width: miciDriverIconSize * unit,
+                height: miciDriverIconSize * unit,
+                child: CustomPaint(
+                  painter: MiciDriverIconPainter(
+                    arcColor: miciDriverArcColor(faceDetected: st.dmFaceDetected, distracted: st.dmDistracted),
+                  ),
+                  child: Center(
+                    child: Icon(Icons.person, color: Colors.white, size: miciDriverIconSize * unit * 0.62),
                   ),
                 ),
               ),
 
-            // information column
-            Positioned(
-              top: 0,
-              right: 0,
-              width: infoW,
-              height: h * miciInfoHeightFraction,
-              child: MiciInfoPanel(uiState: st, clockMode: clockMode),
-            ),
+            // clock, top right
+            if (clockMode != ClockMode.off)
+              Positioned(
+                right: edge,
+                top: edge,
+                child: _pill(
+                  unit,
+                  height: 36,
+                  child: ClockText(
+                    mode: clockMode,
+                    style: TextStyle(
+                      color: HudColors.white,
+                      fontSize: 20 * unit,
+                      fontWeight: FontWeight.w600,
+                      height: 1.0,
+                    ),
+                  ),
+                ),
+              ),
 
-            // status ball, bottom right
+            // steering wheel, bottom left
+            if (active)
+              Positioned(
+                left: edge,
+                bottom: edge,
+                width: miciWheelSize * unit,
+                height: miciWheelSize * unit,
+                child: Transform.rotate(
+                  angle: -st.steeringAngleDeg * pi / 180,
+                  child: CustomPaint(
+                    painter: MiciWheelPainter(color: wheelTint(st.lateralMode) ?? Colors.white),
+                  ),
+                ),
+              ),
+
+            // status ball on a dark disc, bottom right
             if (ball != null)
               Positioned(
-                right: 14 * unit,
-                bottom: 14 * unit,
-                width: 2 * miciBallRadius * unit,
-                height: 2 * miciBallRadius * unit,
+                right: edge,
+                bottom: edge,
+                width: 2 * (miciBallRadius + 5) * unit,
+                height: 2 * (miciBallRadius + 5) * unit,
                 child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: ball,
+                  decoration: const BoxDecoration(shape: BoxShape.circle, color: _discColor),
+                  child: Padding(
+                    padding: EdgeInsets.all(5 * unit),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: ball,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -246,11 +288,11 @@ class MiciExtendedLayout extends StatelessWidget {
 
             AlertRenderer(uiState: st, scale: classicScale),
 
-            // border in the engagement colour, on top of everything
+            // thick border in the engagement colour, on top of everything
             DecoratedBox(
               decoration: BoxDecoration(
                 borderRadius: radius,
-                border: Border.all(color: miciBorderColor(st.status), width: 4 * unit),
+                border: Border.all(color: miciBorderColor(st.status), width: miciBorderWidth * unit),
               ),
             ),
           ],
@@ -260,10 +302,260 @@ class MiciExtendedLayout extends StatelessWidget {
   }
 }
 
+/// dark rounded box, as behind the speed; as wide as its content
+Widget _pill(double unit, {required double height, required Widget child}) {
+  return Container(
+    height: height * unit,
+    padding: EdgeInsets.symmetric(horizontal: 14 * unit),
+    decoration: BoxDecoration(
+      color: _pillColor,
+      borderRadius: BorderRadius.circular(12 * unit),
+    ),
+    child: Center(widthFactor: 1, child: child),
+  );
+}
+
+Widget _roadName(String name, double unit, double screenW) {
+  return ConstrainedBox(
+    constraints: BoxConstraints(maxWidth: screenW * 0.5),
+    child: Container(
+      height: 24 * unit,
+      padding: EdgeInsets.symmetric(horizontal: 10 * unit),
+      decoration: BoxDecoration(
+        color: _pillColor,
+        borderRadius: BorderRadius.circular(8 * unit),
+      ),
+      child: Center(
+        widthFactor: 1,
+        child: Text(
+          name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: HudColors.whiteTranslucent,
+            fontSize: 13 * unit,
+            fontWeight: FontWeight.w600,
+            height: 1.0,
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+// -- top row --
+
+/// speed in a dark pill at top centre; set speed to its left and the speed limit
+/// sign to its right, so the speed stays centred whatever is shown beside it
+class MiciTopRow extends StatelessWidget {
+  final UIState uiState;
+  final double unit;
+
+  const MiciTopRow({super.key, required this.uiState, required this.unit});
+
+  @override
+  Widget build(BuildContext context) {
+    final st = uiState;
+    final gap = SizedBox(width: 8 * unit);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: st.isCruiseAvailable ? _setSpeed() : const SizedBox.shrink(),
+          ),
+        ),
+        gap,
+        _speed(),
+        gap,
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: st.showSpeedLimit ? _speedLimit() : const SizedBox.shrink(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _speed() {
+    return _pill(
+      unit,
+      height: miciSpeedPillHeight,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          Text(
+            '${uiState.displaySpeed.round()}',
+            style: TextStyle(color: HudColors.white, fontSize: 34 * unit, fontWeight: FontWeight.bold, height: 1.0),
+          ),
+          SizedBox(width: 5 * unit),
+          Text(
+            uiState.isMetric ? 'km/h' : 'mph',
+            style: TextStyle(
+                color: HudColors.whiteTranslucent, fontSize: 14 * unit, fontWeight: FontWeight.w500, height: 1.0),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// same colours as the Classic MAX box
+  Widget _setSpeed() {
+    final st = uiState;
+    Color maxColor = HudColors.grey;
+    Color speedColor = HudColors.grey;
+    if (st.isCruiseSet) {
+      speedColor = HudColors.white;
+      if (st.status == UIStatus.engaged) {
+        maxColor = HudColors.engaged;
+      } else if (st.status == UIStatus.disengaged) {
+        maxColor = HudColors.disengaged;
+      } else if (st.status == UIStatus.override_) {
+        maxColor = HudColors.override_;
+      }
+    }
+    return _pill(
+      unit,
+      height: 40,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          Text(
+            'MAX',
+            style: TextStyle(color: maxColor, fontSize: 11 * unit, fontWeight: FontWeight.w600, height: 1.0),
+          ),
+          SizedBox(width: 5 * unit),
+          Text(
+            st.isCruiseSet ? '${st.setSpeed.round()}' : '–',
+            style: TextStyle(color: speedColor, fontSize: 24 * unit, fontWeight: FontWeight.bold, height: 1.0),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// round European sign for metric, rectangular US sign for imperial
+  Widget _speedLimit() {
+    final sign = SpeedLimitSign.from(uiState);
+    final value = Text(
+      sign.value,
+      style: TextStyle(color: sign.textColor, fontSize: 46, fontWeight: FontWeight.bold, height: 1.0),
+    );
+    final Widget drawn;
+    if (uiState.isMetric) {
+      drawn = Container(
+        width: 110,
+        height: 110,
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: SpeedLimitColors.white,
+          border: Border.all(color: SpeedLimitColors.red, width: 12),
+        ),
+        child: FittedBox(fit: BoxFit.scaleDown, child: value),
+      );
+    } else {
+      const label = TextStyle(color: SpeedLimitColors.black, fontSize: 13, fontWeight: FontWeight.bold, height: 1.1);
+      drawn = Container(
+        width: 90,
+        height: 110,
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: SpeedLimitColors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: SpeedLimitColors.black, width: 3),
+        ),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('SPEED', style: label),
+              const Text('LIMIT', style: label),
+              value,
+            ],
+          ),
+        ),
+      );
+    }
+    // drawn at a fixed size, then scaled to the height of the row
+    return SizedBox(
+      height: miciSpeedPillHeight * unit,
+      child: FittedBox(fit: BoxFit.contain, child: drawn),
+    );
+  }
+}
+
+// -- steering wheel --
+
+/// solid wheel as on the comma four: a disc with a hub and three spokes
+/// (left, right, down). Drawn here because the device's icon file is not in the app
+class MiciWheelPainter extends CustomPainter {
+  final Color color;
+
+  const MiciWheelPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final r = size.shortestSide / 2;
+    final fill = Paint()..color = color.withAlpha(235);
+    final dark = Paint()..color = const Color(0xD9101010);
+
+    canvas.drawCircle(c, r, fill);
+    canvas.drawCircle(c, r * 0.74, dark);
+
+    final spoke = Paint()
+      ..color = color.withAlpha(235)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = r * 0.26;
+    canvas.drawLine(c, c + Offset(-r * 0.8, 0), spoke);
+    canvas.drawLine(c, c + Offset(r * 0.8, 0), spoke);
+    canvas.drawLine(c, c + Offset(0, r * 0.8), spoke);
+    canvas.drawCircle(c, r * 0.3, fill);
+  }
+
+  @override
+  bool shouldRepaint(MiciWheelPainter old) => old.color != color;
+}
+
+// -- driver monitoring icon --
+
+/// dark disc with an arc over the top in the attention colour; the person glyph is
+/// the painter's child
+class MiciDriverIconPainter extends CustomPainter {
+  final Color arcColor;
+
+  const MiciDriverIconPainter({required this.arcColor});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final r = size.shortestSide / 2;
+    canvas.drawCircle(c, r, Paint()..color = _discColor);
+    final arc = Paint()
+      ..color = arcColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = r * 0.16
+      ..strokeCap = StrokeCap.round;
+    // 100 degrees centred on the top
+    canvas.drawArc(Rect.fromCircle(center: c, radius: r * 0.84), -pi / 2 - 50 * pi / 180, 100 * pi / 180, false, arc);
+  }
+
+  @override
+  bool shouldRepaint(MiciDriverIconPainter old) => old.arcColor != arcColor;
+}
+
 // -- torque bar (mici/onroad/torque_bar.py) --
 
-/// arc along the bottom of the camera view: grey track, filled from the centre
-/// towards the side the car is steering, turning orange near the limit
+/// arc along the bottom of the screen: grey track, filled from the centre towards
+/// the side the car is steering, turning orange near the limit
 class MiciTorqueBarPainter extends CustomPainter {
   final double value;  // -1..1
   final UIStatus status;
@@ -278,11 +570,11 @@ class MiciTorqueBarPainter extends CustomPainter {
     final steering = status == UIStatus.engaged || status == UIStatus.latOnly;
 
     final mag = value.abs();
-    final offset = _interp(mag, 0.5, 1, 22, 26) * unit;
+    final offset = (_interp(mag, 0.5, 1, 22, 26) + miciBorderWidth) * unit;
     final thickness = _interp(mag, 0.5, 1, 14, 56) * unit;
     final radius = _torqueRadius * unit;
     final midR = radius + thickness / 2;
-    final center = Offset(size.width / 2 + 8 * unit, size.height + radius - offset);
+    final center = Offset(size.width / 2, size.height + radius - offset);
     final arc = Rect.fromCircle(center: center, radius: midR);
 
     const top = -pi / 2;
@@ -320,149 +612,6 @@ class MiciTorqueBarPainter extends CustomPainter {
   @override
   bool shouldRepaint(MiciTorqueBarPainter old) =>
       old.value != value || old.status != status || old.unit != unit;
-}
-
-// -- information panel --
-
-const _infoShadow = [Shadow(color: Color(0xCC000000), blurRadius: 12)];
-
-/// what the comma four screen leaves out: clock, speed, set speed and speed limit,
-/// drawn over the video. Every item scales to the space it is given
-class MiciInfoPanel extends StatelessWidget {
-  final UIState uiState;
-  final ClockMode clockMode;
-
-  const MiciInfoPanel({super.key, required this.uiState, required this.clockMode});
-
-  @override
-  Widget build(BuildContext context) {
-    final st = uiState;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (clockMode != ClockMode.off) _cell(2, _clock()),
-        _cell(4, _speed()),
-        if (st.isCruiseAvailable) _cell(3, _setSpeed()),
-        if (st.showSpeedLimit) _cell(3, _speedLimit()),
-      ],
-    );
-  }
-
-  /// one item, scaled to fill its share of the panel
-  Widget _cell(int flex, Widget child) {
-    return Expanded(
-      flex: flex,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: FittedBox(fit: BoxFit.contain, child: child),
-      ),
-    );
-  }
-
-  Widget _speed() {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.baseline,
-      textBaseline: TextBaseline.alphabetic,
-      children: [
-        Text(
-          '${uiState.displaySpeed.round()}',
-          style: const TextStyle(
-              color: HudColors.white, fontSize: 96, fontWeight: FontWeight.bold, height: 1.0, shadows: _infoShadow),
-        ),
-        const SizedBox(width: 10),
-        Text(
-          uiState.isMetric ? 'km/h' : 'mph',
-          style: const TextStyle(
-              color: HudColors.white, fontSize: 30, fontWeight: FontWeight.w500, height: 1.0, shadows: _infoShadow),
-        ),
-      ],
-    );
-  }
-
-  /// same colours as the Classic MAX box
-  Widget _setSpeed() {
-    final st = uiState;
-    Color maxColor = HudColors.grey;
-    Color speedColor = HudColors.darkGrey;
-    if (st.isCruiseSet) {
-      speedColor = HudColors.white;
-      if (st.status == UIStatus.engaged) {
-        maxColor = HudColors.engaged;
-      } else if (st.status == UIStatus.disengaged) {
-        maxColor = HudColors.disengaged;
-      } else if (st.status == UIStatus.override_) {
-        maxColor = HudColors.override_;
-      }
-    }
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          'MAX',
-          style: TextStyle(
-              color: maxColor, fontSize: 24, fontWeight: FontWeight.w600, height: 1.2, shadows: _infoShadow),
-        ),
-        Text(
-          st.isCruiseSet ? '${st.setSpeed.round()}' : '–',
-          style: TextStyle(
-              color: speedColor, fontSize: 64, fontWeight: FontWeight.bold, height: 1.0, shadows: _infoShadow),
-        ),
-      ],
-    );
-  }
-
-  /// round European sign for metric, rectangular US sign for imperial
-  Widget _speedLimit() {
-    final sign = SpeedLimitSign.from(uiState);
-    final value = Text(
-      sign.value,
-      style: TextStyle(color: sign.textColor, fontSize: 46, fontWeight: FontWeight.bold, height: 1.0),
-    );
-    if (uiState.isMetric) {
-      return Container(
-        width: 110,
-        height: 110,
-        padding: const EdgeInsets.all(22),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: SpeedLimitColors.white,
-          border: Border.all(color: SpeedLimitColors.red, width: 12),
-        ),
-        child: FittedBox(fit: BoxFit.scaleDown, child: value),
-      );
-    }
-    const label = TextStyle(color: SpeedLimitColors.black, fontSize: 13, fontWeight: FontWeight.bold, height: 1.1);
-    return Container(
-      width: 90,
-      height: 110,
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: SpeedLimitColors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: SpeedLimitColors.black, width: 3),
-      ),
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('SPEED', style: label),
-            const Text('LIMIT', style: label),
-            value,
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _clock() {
-    return ClockText(
-      mode: clockMode,
-      style: const TextStyle(
-          color: HudColors.white, fontSize: 64, fontWeight: FontWeight.w600, height: 1.0, shadows: _infoShadow),
-    );
-  }
 }
 
 /// linear interpolation of [x] from [x0]..[x1] to [y0]..[y1], held at the ends

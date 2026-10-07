@@ -70,6 +70,11 @@ class UIState extends ChangeNotifier {
   // carOutput.actuatorsOutput.torque, -1..1
   double torqueOutput = 0.0;
 
+  // driverMonitoringState
+  bool dmSeen = false;
+  bool dmFaceDetected = false;
+  bool dmDistracted = false;
+
   // modelV2 — raw lists from cereal
   List<double> pathX = [];
   List<double> pathY = [];
@@ -379,6 +384,12 @@ class UIState extends ChangeNotifier {
   void applyCarParams(Map<String, dynamic> data) {
     brand = data['brand'] as String? ?? '';
     carFlags = (data['flags'] as num?)?.toInt() ?? 0;
+  }
+
+  void applyDriverMonitoringState(Map<String, dynamic> data) {
+    dmSeen = true;
+    dmFaceDetected = data['faceDetected'] as bool? ?? false;
+    dmDistracted = data['isDistracted'] as bool? ?? false;
   }
 
   void applyCarControl(Map<String, dynamic> data) {

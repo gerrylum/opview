@@ -24,6 +24,7 @@ const bridgeServicesOut = [
   'carOutput',
   'selfdriveStateSP',
   'onroadEvents',
+  'driverMonitoringState',  // comma four style layout: driver monitoring icon
 ];
 
 // names used before openpilot renamed these services
