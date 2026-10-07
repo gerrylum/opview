@@ -1,13 +1,12 @@
 // augmented road view — the main onroad screen
 // ported from openpilot selfdrive/ui/onroad/augmented_road_view.py
-// + dashy augmented_road_view.js for video-scale-aware calibration
+// video and overlay share one zoom + horizon offset, as on the device
 //
 // layer stack (matches stock render order):
-//   0. RTCVideoView (BoxFit.cover)
+//   0. RTCVideoView (zoomed and shifted by the frame transform)
 //   1. ClipRect -> ModelRenderer + HudRenderer + AlertRenderer
 //   2. EngagementBorder (on top of everything)
 
-import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -17,22 +16,35 @@ import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/alert_renderer.dart';
 
+// which build this is, shown on the Connecting screen; set at build time with
+// flutter build apk --dart-define=OPVIEW_BUILD=0.1.1-comma3x.N
+const opviewBuild = String.fromEnvironment('OPVIEW_BUILD', defaultValue: 'dev build');
+
 // -- border colors (augmented_road_view.py:23-27) --
 
 const borderColors = {
   UIStatus.disengaged: Color(0xFF122839),
   UIStatus.override_: Color(0xFF89928D),
   UIStatus.engaged: Color(0xFF167F40),
+  // sunnypilot MADS (sunnypilot/onroad/augmented_road_view.py BORDER_COLORS_SP)
+  UIStatus.latOnly: Color(0xFF00C8C8),   // cyan: steering only
+  UIStatus.longOnly: Color(0xFF961CA8),  // purple: cruise only
 };
 
 class AugmentedRoadView extends StatefulWidget {
   final UIState uiState;
   final RTCVideoRenderer? videoRenderer;
 
+  // manual device IP, for networks where mDNS discovery does not work
+  final Future<String?> Function()? loadManualHost;
+  final Future<void> Function(String? host)? onSetManualHost;
+
   const AugmentedRoadView({
     super.key,
     required this.uiState,
     this.videoRenderer,
+    this.loadManualHost,
+    this.onSetManualHost,
   });
 
   @override
@@ -49,9 +61,7 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
   String _cachedStreamType = '';
   double _cachedScreenW = 0;
   double _cachedScreenH = 0;
-  List<List<double>> _cachedTransform = [
-    [0, 0, 0], [0, 0, 0], [0, 0, 0],
-  ];
+  FrameTransform? _cachedTransform;
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +74,7 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
         final borderSize = uiBorderSize * scale;
 
         // recompute transform only when inputs change
-        final transform = _getTransform(screenW, screenH);
+        final frame = _getTransform(screenW, screenH);
 
         // content rect (inside border)
         final contentRect = Rect.fromLTWH(
@@ -78,14 +88,14 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
             fit: StackFit.expand,
             children: [
               // layer 0 + 1a: video + model overlay
-              _videoLayer(),
+              _videoLayer(frame),
               ClipRect(
                 clipper: _ContentClipper(contentRect),
                 child: CustomPaint(
                   size: Size(screenW, screenH),
                   painter: ModelRendererPainter(
                     state: widget.uiState,
-                    carSpaceTransform: transform,
+                    carSpaceTransform: frame.carToScreen,
                     contentRect: contentRect,
                   ),
                 ),
@@ -133,6 +143,10 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
                           fontWeight: FontWeight.w300,
                         ),
                       ),
+                      Text(
+                        'opview $opviewBuild',
+                        style: TextStyle(color: const Color(0x66FFFFFF), fontSize: 18 * scale),
+                      ),
                       SizedBox(height: 20 * scale),
                       ...widget.uiState.connectionLog.map((line) => Text(
                         line,
@@ -145,6 +159,16 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
                           fontWeight: FontWeight.w300,
                         ),
                       )),
+                      if (widget.onSetManualHost != null) ...[
+                        SizedBox(height: 20 * scale),
+                        TextButton(
+                          onPressed: () => _showManualHostDialog(context),
+                          child: Text(
+                            'Set device IP',
+                            style: TextStyle(color: const Color(0x99FFFFFF), fontSize: 20 * scale),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -155,19 +179,59 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
     );
   }
 
-  /// video layer: RTCVideoView with BoxFit.cover, or black placeholder
-  Widget _videoLayer() {
+  /// ask for the device IP; empty clears it and goes back to auto-discovery
+  Future<void> _showManualHostDialog(BuildContext context) async {
+    final current = await widget.loadManualHost?.call() ?? '';
+    if (!context.mounted) return;
+    final controller = TextEditingController(text: current);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Device IP'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(hintText: 'e.g. 192.168.1.50 (empty = auto)'),
+          onSubmitted: (v) => Navigator.of(context).pop(v),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(context).pop(controller.text), child: const Text('Save')),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (result != null) await widget.onSetManualHost!(result);
+  }
+
+  /// video layer: the camera image zoomed and shifted exactly as the overlay is,
+  /// or black placeholder
+  Widget _videoLayer(FrameTransform frame) {
     if (widget.videoRenderer == null) {
       return Container(color: Colors.black);
     }
-    return RTCVideoView(
-      widget.videoRenderer!,
-      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+    return Stack(
+      clipBehavior: Clip.hardEdge,
+      children: [
+        Positioned(
+          left: frame.videoLeft,
+          top: frame.videoTop,
+          width: frame.videoWidth,
+          height: frame.videoHeight,
+          // the stream is the whole camera frame scaled down (1152x720 for 1928x1208),
+          // so cover only trims a fraction of a percent
+          child: RTCVideoView(
+            widget.videoRenderer!,
+            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+          ),
+        ),
+      ],
     );
   }
 
   /// return cached transform, recompute only when inputs changed
-  List<List<double>> _getTransform(double screenW, double screenH) {
+  FrameTransform _getTransform(double screenW, double screenH) {
     final st = widget.uiState;
     if (screenW == _cachedScreenW &&
         screenH == _cachedScreenH &&
@@ -176,8 +240,9 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
         st.sensor == _cachedSensor &&
         st.streamType == _cachedStreamType &&
         listEquals(st.rpyCalib, _cachedRpyCalib) &&
-        listEquals(st.wideFromDeviceEuler, _cachedWideFromDeviceEuler)) {
-      return _cachedTransform;
+        listEquals(st.wideFromDeviceEuler, _cachedWideFromDeviceEuler) &&
+        _cachedTransform != null) {
+      return _cachedTransform!;
     }
 
     _cachedScreenW = screenW;
@@ -188,42 +253,26 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
     _cachedStreamType = st.streamType;
     _cachedRpyCalib = List.of(st.rpyCalib);
     _cachedWideFromDeviceEuler = List.of(st.wideFromDeviceEuler);
-    _cachedTransform = _calcFrameMatrix(screenW, screenH);
-    return _cachedTransform;
+    return _cachedTransform = _calcFrameMatrix(screenW, screenH);
   }
 
-  /// compute the 3D->2D projection matrix
-  /// ported from augmented_road_view.py:161-218 + dashy augmented_road_view.js
-  List<List<double>> _calcFrameMatrix(double screenW, double screenH) {
+  /// video placement and 3D->2D projection, one transform for both
+  /// ported from augmented_road_view.py _calc_frame_matrix
+  FrameTransform _calcFrameMatrix(double screenW, double screenH) {
     final isWideCamera = widget.uiState.streamType == 'wideRoad';
-
-    // camera config — ecam for wide, fcam for road (augmented_road_view.py:174-175)
     final deviceCamera = _lookupCamera();
-    final camConfig = isWideCamera ? deviceCamera.ecam : deviceCamera.fcam;
-    final intrinsic = camConfig.intrinsics;
-    final camW = camConfig.width.toDouble();
-    final camH = camConfig.height.toDouble();
-
-    // zoom: 2.0 for wide, 1.1 for road (augmented_road_view.py:177)
-    final zoom = isWideCamera ? 2.0 : 1.1;
-
-    // calibration: wide uses view_from_wide_calib, road uses view_from_calib (augmented_road_view.py:176)
-    final calibration = isWideCamera ? _computeWideViewFromCalib() : _computeViewFromCalib();
-
-    // video scale matches BoxFit.cover: use the larger ratio
-    final videoScale = max(screenW / camW, screenH / camH);
-    final focalScaled = intrinsic[0][0] * videoScale * zoom;
-
-    // scaled intrinsic: positive focal for Flutter Canvas (Y-down)
-    // stock openpilot uses -focal for OpenGL (Y-up), dashy uses -focal + canvas transform
-    final scaledIntrinsic = [
-      [focalScaled, 0.0, screenW / 2],
-      [0.0, focalScaled, screenH / 2],
-      [0.0, 0.0, 1.0],
-    ];
-
-    // final transform: scaledIntrinsic @ calibration
-    return matmul3x3(scaledIntrinsic, calibration);
+    final scale = screenH / 1080.0;
+    final border = uiBorderSize * scale;
+    return calcFrameTransform(
+      camera: isWideCamera ? deviceCamera.ecam : deviceCamera.fcam,
+      calibration: isWideCamera ? _computeWideViewFromCalib() : _computeViewFromCalib(),
+      deviceZoom: isWideCamera ? 2.0 : 1.1,
+      scale: scale,
+      x: border,
+      y: border,
+      w: screenW - 2 * border,
+      h: screenH - 2 * border,
+    );
   }
 
   /// look up camera by device type + sensor, fallback to default

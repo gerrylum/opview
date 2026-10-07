@@ -6,6 +6,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
+import 'package:opview/selfdrive/ui/onroad/exp_button.dart';
+import 'package:opview/selfdrive/ui/onroad/road_name_renderer.dart';
+import 'package:opview/selfdrive/ui/onroad/speed_limit_renderer.dart';
+import 'package:opview/selfdrive/ui/onroad/turn_signal_renderer.dart';
 
 // -- constants (hud_renderer.py) --
 
@@ -47,6 +51,11 @@ class HudRenderer extends StatelessWidget {
         _headerGradient(),
         if (uiState.isCruiseAvailable) _setSpeedBox(),
         _currentSpeed(),
+        ExpButton(uiState: uiState, scale: scale),
+        // sunnypilot extras (sunnypilot/onroad/hud_renderer.py render order)
+        RoadNameRenderer(uiState: uiState, scale: scale),
+        Positioned.fill(child: SpeedLimitRenderer(uiState: uiState, scale: scale)),
+        Positioned.fill(child: TurnSignalRenderer(uiState: uiState, scale: scale)),
       ],
     );
   }
@@ -82,6 +91,8 @@ class HudRenderer extends StatelessWidget {
         case UIStatus.engaged: maxColor = HudColors.engaged;
         case UIStatus.disengaged: maxColor = HudColors.disengaged;
         case UIStatus.override_: maxColor = HudColors.override_;
+        case UIStatus.latOnly:
+        case UIStatus.longOnly: break; // grey, as on the device
       }
     }
 
@@ -123,20 +134,21 @@ class HudRenderer extends StatelessWidget {
     );
   }
 
-  /// current speed: big bold number, centered
+  /// current speed: big bold number, centered.
+  /// device (hud_renderer.py) centres the number at y=180 and the unit at y=290 on screen,
+  /// i.e. 150 and 260 inside the border, below the road name
   Widget _currentSpeed() {
     final speedText = '${uiState.displaySpeed.round()}';
     final unitText = uiState.isMetric ? 'km/h' : 'mph';
 
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      height: _headerHeight * scale,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(speedText,
+    return Stack(
+      children: [
+        Positioned(
+          top: (150 - _fontCurrentSpeed / 2) * scale,
+          left: 0,
+          right: 0,
+          child: Text(speedText,
+            textAlign: TextAlign.center,
             style: TextStyle(
               color: HudColors.white,
               fontSize: _fontCurrentSpeed * scale,
@@ -144,16 +156,22 @@ class HudRenderer extends StatelessWidget {
               height: 1.0,
             ),
           ),
-          Text(unitText,
+        ),
+        Positioned(
+          top: (260 - _fontSpeedUnit / 2) * scale,
+          left: 0,
+          right: 0,
+          child: Text(unitText,
+            textAlign: TextAlign.center,
             style: TextStyle(
               color: HudColors.whiteTranslucent,
               fontSize: _fontSpeedUnit * scale,
               fontWeight: FontWeight.w500,
-              height: 1.2,
+              height: 1.0,
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

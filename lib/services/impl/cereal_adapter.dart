@@ -55,7 +55,13 @@ class CerealAdapter implements TelemetryAdapter {
       final sanitized = raw.contains('NaN') ? raw.replaceAll(_nanRegex, 'null') : raw;
       final json = jsonDecode(sanitized) as Map<String, dynamic>;
       final type = json['type'] as String?;
-      final data = json['data'] as Map<String, dynamic>?;
+      final payload = json['data'];
+      // onroadEvents is the one service whose payload is a list
+      if (type == 'onroadEvents' && payload is List) {
+        state.applyOnroadEvents(payload);
+        return false;
+      }
+      final data = payload as Map<String, dynamic>?;
 
       if (type == null || data == null) return false;
 
@@ -80,6 +86,7 @@ class CerealAdapter implements TelemetryAdapter {
         state.applyModelV2(data);
         return true; // modelV2 triggers render
       case 'liveCalibration':
+      case 'extrinsicsCalibration': // renamed from liveCalibration, same fields
         state.applyLiveCalibration(data);
         return false;
       case 'radarState':
@@ -92,7 +99,30 @@ class CerealAdapter implements TelemetryAdapter {
         state.applyDeviceState(data);
         return false;
       case 'roadCameraState':
+      case 'narrowRoadCameraState': // renamed from roadCameraState, same fields
         state.applyRoadCameraState(data);
+        return false;
+      // sunnypilot extras
+      case 'opviewParams': // device settings, sent by webrtcd on dys-a
+        state.applyOpviewParams(data);
+        return false;
+      case 'longitudinalPlanSP':
+        state.applyLongitudinalPlanSP(data);
+        return false;
+      case 'liveMapDataSP':
+        state.applyLiveMapDataSP(data);
+        return false;
+      case 'carParams':
+        state.applyCarParams(data);
+        return false;
+      case 'carControl':
+        state.applyCarControl(data);
+        return false;
+      case 'carOutput':
+        state.applyCarOutput(data);
+        return false;
+      case 'selfdriveStateSP':
+        state.applySelfdriveStateSP(data);
         return false;
       default:
         return false;

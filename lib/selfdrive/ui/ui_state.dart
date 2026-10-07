@@ -16,7 +16,23 @@ const msToMph = 2.23694;
 
 // -- engagement status (matches ui_state.py UIStatus) --
 
-enum UIStatus { disengaged, engaged, override_ }
+enum UIStatus { disengaged, engaged, override_, latOnly, longOnly }
+
+// -- sunnypilot (speed_limit/common.py Mode, lateral_mode.py) --
+
+/// SpeedLimitMode param: 0 off, 1 information, 2 warning, 3 assist
+const speedLimitModeOff = 0;
+const speedLimitModeWarning = 2;
+
+/// opendbc RivianFlags.ANGLE_HARNESS
+const rivianAngleHarnessFlag = 2;
+
+/// consecutive zero-CAN-torque carOutput samples before calling it angle steering.
+/// the device uses 10 frames at 100 Hz (0.1 s); webrtcd sends carOutput at 20 Hz for opview
+const zeroTorqueHold = 3;
+
+/// how the wheel icon is tinted while MADS steers an angle-capable Rivian
+enum LateralMode { angle, torque }
 
 // -- state --
 
@@ -33,6 +49,7 @@ class UIState extends ChangeNotifier {
 
   // selfdriveState
   bool enabled = false;
+  bool engageable = false;
   bool experimentalMode = false;
   String alertText1 = '';
   String alertText2 = '';
@@ -78,8 +95,57 @@ class UIState extends ChangeNotifier {
   String deviceType = '';
   String sensor = '';
 
-  // is_metric (default true, like stock)
+  // is_metric (default true, like stock); replaced by the device's IsMetric once opviewParams arrives
   bool isMetric = true;
+
+  // opviewParams — device settings sent by webrtcd (dys-a) once a second
+  bool paramsSeen = false;
+  int speedLimitMode = speedLimitModeOff;
+  bool roadNameToggle = false;
+  bool forceTorqueSteer = false;
+  bool trueVEgoUI = false;
+  bool liveSpeedCorrection = false;
+  int cruiseSpeedOffsetKph = 0;
+  bool showTurnSignals = false;
+  bool showBlindSpot = false;
+
+  // selfdriveStateSP.mads + onroadEvents — sunnypilot border colours
+  bool madsSeen = false;
+  String madsState = 'disabled';
+  bool madsEnabled = false;
+  bool madsAvailable = false;
+  bool overrideLongitudinal = false;
+
+  // carState turn signals / blind spot
+  bool leftBlinker = false;
+  bool rightBlinker = false;
+  bool leftBlindspot = false;
+  bool rightBlindspot = false;
+  DateTime? leftSignalSince;   // when the blinker came on, for the arrow pulse
+  DateTime? rightSignalSince;
+
+  // longitudinalPlanSP.speedLimit — speeds in m/s
+  double speedLimit = 0.0;
+  double speedLimitLast = 0.0;
+  double speedLimitOffset = 0.0;
+  bool speedLimitValid = false;
+  bool speedLimitLastValid = false;
+  double speedLimitFinalLast = 0.0;
+  String speedLimitSource = 'none';
+  String speedLimitAssistState = 'disabled';
+
+  // liveMapDataSP — speeds in m/s, distance in m
+  bool speedLimitAheadValid = false;
+  double speedLimitAhead = 0.0;
+  double speedLimitAheadDistance = 0.0;
+  String roadName = '';
+
+  // carParams / carControl / carOutput — for the Rivian angle/torque wheel tint
+  String brand = '';
+  int carFlags = 0;
+  bool latActive = false;
+  int _zeroTorqueCount = zeroTorqueHold;
+  LateralMode? lateralMode;
 
   // active camera: 'road' or 'wideRoad' (switches on experimental mode)
   String streamType = 'road';
@@ -118,11 +184,20 @@ class UIState extends ChangeNotifier {
     vEgoCluster = (data['vEgoCluster'] as num?)?.toDouble() ?? 0.0;
     vCruiseCluster = (data['vCruiseCluster'] as num?)?.toDouble() ?? 0.0;
     if (!vEgoClusterSeen && vEgoCluster != 0.0) vEgoClusterSeen = true;
+    final left = data['leftBlinker'] as bool? ?? false;
+    final right = data['rightBlinker'] as bool? ?? false;
+    if (left && !leftBlinker) leftSignalSince = DateTime.now();
+    if (right && !rightBlinker) rightSignalSince = DateTime.now();
+    leftBlinker = left;
+    rightBlinker = right;
+    leftBlindspot = data['leftBlindspot'] as bool? ?? false;
+    rightBlindspot = data['rightBlindspot'] as bool? ?? false;
     // no notify — picked up on next modelV2
   }
 
   void applySelfdriveState(Map<String, dynamic> data) {
     enabled = data['enabled'] as bool? ?? false;
+    engageable = data['engageable'] as bool? ?? false;
     experimentalMode = data['experimentalMode'] as bool? ?? false;
     alertText1 = data['alertText1'] as String? ?? '';
     alertText2 = data['alertText2'] as String? ?? '';
@@ -132,11 +207,7 @@ class UIState extends ChangeNotifier {
 
     // update engagement status
     started = true;
-    if (openpilotState == 'preEnabled' || openpilotState == 'overriding') {
-      status = UIStatus.override_;
-    } else {
-      status = enabled ? UIStatus.engaged : UIStatus.disengaged;
-    }
+    _updateStatus();
     // no notify — picked up on next modelV2
   }
 
@@ -205,11 +276,146 @@ class UIState extends ChangeNotifier {
     // no notify — picked up on next modelV2
   }
 
+  /// engagement status; once sunnypilot's MADS state has arrived, follow
+  /// sunnypilot ui_state.py UIStateSP.update_status
+  void _updateStatus() {
+    final override = openpilotState == 'preEnabled' || openpilotState == 'overriding';
+    if (!madsSeen) {
+      status = override ? UIStatus.override_ : (enabled ? UIStatus.engaged : UIStatus.disengaged);
+      return;
+    }
+    if (openpilotState == 'preEnabled') {
+      status = UIStatus.override_;
+    } else if (openpilotState == 'overriding' && (!madsAvailable || overrideLongitudinal)) {
+      status = UIStatus.override_;
+    } else if (madsState == 'paused' || madsState == 'overriding') {
+      status = UIStatus.override_;
+    } else if (!madsAvailable) {
+      status = enabled ? UIStatus.engaged : UIStatus.disengaged;
+    } else if (madsEnabled && enabled) {
+      status = UIStatus.engaged;
+    } else if (madsEnabled) {
+      status = UIStatus.latOnly;
+    } else if (enabled) {
+      status = UIStatus.longOnly;
+    } else {
+      status = UIStatus.disengaged;
+    }
+  }
+
+  // -- sunnypilot apply methods --
+
+  void applySelfdriveStateSP(Map<String, dynamic> data) {
+    final mads = data['mads'] as Map<String, dynamic>? ?? const {};
+    madsSeen = true;
+    madsState = mads['state'] as String? ?? 'disabled';
+    madsEnabled = mads['enabled'] as bool? ?? false;
+    madsAvailable = mads['available'] as bool? ?? false;
+    _updateStatus();
+    // no notify — picked up on next modelV2
+  }
+
+  /// onroadEvents is a list of events; only overrideLongitudinal matters here
+  void applyOnroadEvents(List<dynamic> events) {
+    overrideLongitudinal = events.any((e) => e is Map && e['overrideLongitudinal'] == true);
+    _updateStatus();
+  }
+
+  void applyOpviewParams(Map<String, dynamic> data) {
+    paramsSeen = true;
+    isMetric = data['IsMetric'] as bool? ?? isMetric;
+    speedLimitMode = (data['SpeedLimitMode'] as num?)?.toInt() ?? speedLimitModeOff;
+    roadNameToggle = data['RoadNameToggle'] as bool? ?? false;
+    forceTorqueSteer = data['RivianForceTorqueSteer'] as bool? ?? false;
+    trueVEgoUI = data['TrueVEgoUI'] as bool? ?? false;
+    liveSpeedCorrection = data['SPLiveSpeedCorrectionEnabled'] as bool? ?? false;
+    cruiseSpeedOffsetKph = (data['SPCruiseSpeedOffset'] as num?)?.toInt() ?? 0;
+    showTurnSignals = data['ShowTurnSignals'] as bool? ?? false;
+    showBlindSpot = data['BlindSpot'] as bool? ?? false;
+    // car make and flags (carParams is only published every ~50 s)
+    brand = data['CarBrand'] as String? ?? brand;
+    carFlags = (data['CarFlags'] as num?)?.toInt() ?? carFlags;
+    // no notify — picked up on next modelV2
+  }
+
+  void applyLongitudinalPlanSP(Map<String, dynamic> data) {
+    final sl = data['speedLimit'] as Map<String, dynamic>? ?? const {};
+    final resolver = sl['resolver'] as Map<String, dynamic>? ?? const {};
+    final assist = sl['assist'] as Map<String, dynamic>? ?? const {};
+    speedLimit = (resolver['speedLimit'] as num?)?.toDouble() ?? 0.0;
+    speedLimitLast = (resolver['speedLimitLast'] as num?)?.toDouble() ?? 0.0;
+    speedLimitOffset = (resolver['speedLimitOffset'] as num?)?.toDouble() ?? 0.0;
+    speedLimitValid = resolver['speedLimitValid'] as bool? ?? false;
+    speedLimitLastValid = resolver['speedLimitLastValid'] as bool? ?? false;
+    speedLimitFinalLast = (resolver['speedLimitFinalLast'] as num?)?.toDouble() ?? 0.0;
+    speedLimitSource = resolver['source'] as String? ?? 'none';
+    speedLimitAssistState = assist['state'] as String? ?? 'disabled';
+    // no notify — picked up on next modelV2
+  }
+
+  void applyLiveMapDataSP(Map<String, dynamic> data) {
+    speedLimitAheadValid = data['speedLimitAheadValid'] as bool? ?? false;
+    speedLimitAhead = (data['speedLimitAhead'] as num?)?.toDouble() ?? 0.0;
+    speedLimitAheadDistance = (data['speedLimitAheadDistance'] as num?)?.toDouble() ?? 0.0;
+    roadName = data['roadName'] as String? ?? '';
+    // no notify — picked up on next modelV2
+  }
+
+  void applyCarParams(Map<String, dynamic> data) {
+    brand = data['brand'] as String? ?? '';
+    carFlags = (data['flags'] as num?)?.toInt() ?? 0;
+  }
+
+  void applyCarControl(Map<String, dynamic> data) {
+    latActive = data['latActive'] as bool? ?? false;
+  }
+
+  /// lateral_mode.py: on an angle-capable Rivian while MADS steers, the car sends no CAN
+  /// torque when it steers on its angle channel
+  void applyCarOutput(Map<String, dynamic> data) {
+    final angleCapable = brand == 'rivian' && (carFlags & rivianAngleHarnessFlag) != 0;
+    if (!angleCapable || !latActive) {
+      lateralMode = null;
+      return;
+    }
+    if (forceTorqueSteer) {
+      _zeroTorqueCount = 0;
+      lateralMode = LateralMode.torque;
+      return;
+    }
+    final actuators = data['actuatorsOutput'] as Map<String, dynamic>? ?? const {};
+    final torque = (actuators['torqueOutputCan'] as num?)?.toDouble() ?? 0.0;
+    if (torque == 0) {
+      _zeroTorqueCount = _zeroTorqueCount + 1 > zeroTorqueHold ? zeroTorqueHold : _zeroTorqueCount + 1;
+    } else {
+      _zeroTorqueCount = 0;
+    }
+    lateralMode = _zeroTorqueCount >= zeroTorqueHold ? LateralMode.angle : LateralMode.torque;
+  }
+
   // -- derived values --
 
-  /// display speed in current unit (km/h or mph)
+  /// speed conversion for the current unit
+  double get speedConv => isMetric ? msToKph : msToMph;
+
+  /// show the speed limit sign (speed_limit.py: SpeedLimitMode != off)
+  bool get showSpeedLimit => paramsSeen && speedLimitMode != speedLimitModeOff;
+
+  /// show the road name pill (road_name.py)
+  bool get showRoadName => roadNameToggle && roadName.isNotEmpty;
+
+  /// display speed in current unit (km/h or mph); sunnypilot speed_renderer.py:
+  /// the dash speed unless "Always Display True Speed" is on, then the wheel speed,
+  /// less the learned over-read when live speed correction is on
   double get displaySpeed {
-    final v = vEgoClusterSeen ? vEgoCluster : vEgo;
+    double v;
+    if (vEgoClusterSeen && !trueVEgoUI) {
+      v = vEgoCluster;
+    } else if (liveSpeedCorrection) {
+      v = vEgo - cruiseSpeedOffsetKph / msToKph;
+    } else {
+      v = vEgo;
+    }
     final conv = isMetric ? msToKph : msToMph;
     final s = v * conv;
     return s > 0 ? s : 0;
