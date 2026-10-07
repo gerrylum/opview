@@ -7,16 +7,18 @@
 //   - speed in a dark pill, top centre
 //   - steering wheel icon, bottom left, turning with the steering angle
 //   - torque bar, bottom centre
-//   - status ball, bottom right
-// and, as extras for a larger screen, the set speed beside the speed pill, the road
-// name under it, and the clock top right.
+//   - confidence ball on the right edge: high and green when the model is
+//     confident, sinking and turning orange then red as a takeover gets likelier
+// and, as extras for a larger screen, the set speed and clock either side of the
+// speed pill and the road name under it.
 //
 // device measurements are in comma four pixels (240 tall), scaled by `unit`.
 //
 // simplified or not ported yet: the device's own path and lane line style (the
-// Classic overlay is drawn instead); the driver monitoring icon shows attention
-// state only, not head pose; the status ball shows engagement state only, since
-// opview is not sent the model's confidence values.
+// Classic overlay is drawn instead), and the icons are drawn here, not taken from
+// the device's image files. The confidence ball needs the model's disengage
+// predictions, which webrtcd sends only on newer opview branches; without them it
+// stays at the bottom and shows engagement state only.
 
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -67,13 +69,16 @@ Color miciBorderColor(UIStatus status) {
   }
 }
 
-/// top and bottom colour of the status ball (confidence_ball.py), or null when hidden
-List<Color>? miciBallColors(UIStatus status) {
+/// top and bottom colour of the confidence ball (confidence_ball.py), or null when
+/// hidden. While fully engaged the colour follows [confidence]
+List<Color>? miciBallColors(UIStatus status, {double confidence = 1.0}) {
   switch (status) {
     case UIStatus.disengaged:
       return null;
     case UIStatus.engaged:
-      return const [Color(0xFF00FFCC), Color(0xFF00FF26)];
+      if (confidence > 0.5) return const [Color(0xFF00FFCC), Color(0xFF00FF26)];  // green
+      if (confidence > 0.2) return const [Color(0xFFFFC800), Color(0xFFFF7300)];  // orange
+      return const [Color(0xFFFF0015), Color(0xFFFF0059)];                        // red
     case UIStatus.override_:
       return const [Color(0xFFFFFFFF), Color(0xFF525252)];
     case UIStatus.latOnly:
@@ -83,12 +88,10 @@ List<Color>? miciBallColors(UIStatus status) {
   }
 }
 
-/// arc over the driver monitoring icon: green while attentive, orange when
-/// distracted, grey when no face is seen
-Color miciDriverArcColor({required bool faceDetected, required bool distracted}) {
-  if (distracted) return const Color(0xFFFF7300);
-  if (!faceDetected) return const Color(0xFF8C8C8C);
-  return const Color(0xFF17C653);
+/// cone on the driver monitoring icon: green while attention is full, orange once
+/// it starts to run down (driver_state.py CONE_COLOR_*)
+Color miciDriverConeColor({required bool awarenessFull}) {
+  return awarenessFull ? const Color(0xFF00FF40) : const Color(0xFFFF7300);
 }
 
 // -- geometry --
@@ -127,7 +130,11 @@ class MiciExtendedLayout extends StatelessWidget {
 
       // alerts and turn signals are the Classic ones
       final classicScale = h / 1080.0;
-      final ball = miciBallColors(st.status);
+      // without confidence values from the device the ball stays at the bottom
+      final confidence = st.confidenceSeen ? st.confidenceFiltered.clamp(0.0, 1.0).toDouble() : 0.0;
+      final ball = miciBallColors(st.status, confidence: st.confidenceSeen ? confidence : 1.0);
+      final ballSize = 2 * (miciBallRadius + 5) * unit;
+      final ballTop = edge + (1 - confidence) * (h - 2 * edge - ballSize);
       final active = st.status != UIStatus.disengaged;
 
       return ClipRRect(
@@ -167,13 +174,13 @@ class MiciExtendedLayout extends StatelessWidget {
             ),
             Positioned.fill(child: TurnSignalRenderer(uiState: st, scale: classicScale)),
 
-            // top row: set speed | speed | speed limit, with the speed centred
+            // top row: set speed | speed | clock, with the speed centred
             Positioned(
               top: edge,
               left: 0,
               right: 0,
               height: miciSpeedPillHeight * unit,
-              child: MiciTopRow(uiState: st, unit: unit),
+              child: MiciTopRow(uiState: st, unit: unit, clockMode: clockMode),
             ),
 
             // road name under the speed
@@ -185,38 +192,24 @@ class MiciExtendedLayout extends StatelessWidget {
                 child: Center(child: _roadName(st.roadName, unit, w)),
               ),
 
-            // driver monitoring, top left
-            if (active && st.dmSeen)
+            // driver monitoring, top left: the cone points where the driver's head is
+            // turned; dimmed, without a cone, when camera monitoring is not running.
+            // hidden while an alert is showing, as on the device
+            if (active && st.dmSeen && st.alertSize == 0)
               Positioned(
                 left: edge,
                 top: edge,
                 width: miciDriverIconSize * unit,
                 height: miciDriverIconSize * unit,
-                child: CustomPaint(
-                  painter: MiciDriverIconPainter(
-                    arcColor: miciDriverArcColor(faceDetected: st.dmFaceDetected, distracted: st.dmDistracted),
-                  ),
-                  child: Center(
-                    child: Icon(Icons.person, color: Colors.white, size: miciDriverIconSize * unit * 0.62),
-                  ),
-                ),
-              ),
-
-            // clock, top right
-            if (clockMode != ClockMode.off)
-              Positioned(
-                right: edge,
-                top: edge,
-                child: _pill(
-                  unit,
-                  height: 36,
-                  child: ClockText(
-                    mode: clockMode,
-                    style: TextStyle(
-                      color: HudColors.white,
-                      fontSize: 20 * unit,
-                      fontWeight: FontWeight.w600,
-                      height: 1.0,
+                child: Opacity(
+                  opacity: st.dmActive ? 1.0 : 0.35,
+                  child: CustomPaint(
+                    painter: MiciDriverIconPainter(
+                      coneColor: st.dmActive ? miciDriverConeColor(awarenessFull: !st.dmAwarenessUnfull) : null,
+                      rotationDeg: st.dmRotationDeg,
+                    ),
+                    child: Center(
+                      child: Icon(Icons.person, color: Colors.white, size: miciDriverIconSize * unit * 0.62),
                     ),
                   ),
                 ),
@@ -237,13 +230,14 @@ class MiciExtendedLayout extends StatelessWidget {
                 ),
               ),
 
-            // status ball on a dark disc, bottom right
+            // confidence ball on a dark disc, travelling up and down the right edge
             if (ball != null)
               Positioned(
+                key: const ValueKey('miciBall'),
                 right: edge,
-                bottom: edge,
-                width: 2 * (miciBallRadius + 5) * unit,
-                height: 2 * (miciBallRadius + 5) * unit,
+                top: ballTop,
+                width: ballSize,
+                height: ballSize,
                 child: DecoratedBox(
                   decoration: const BoxDecoration(shape: BoxShape.circle, color: _discColor),
                   child: Padding(
@@ -321,13 +315,14 @@ Widget _roadName(String name, double unit, double screenW) {
 
 // -- top row --
 
-/// speed in a dark pill at top centre, with the set speed to its left; the speed
-/// stays centred whether or not the set speed is shown
+/// speed in a dark pill at top centre, with the set speed to its left and the clock
+/// to its right; the speed stays centred whatever is shown beside it
 class MiciTopRow extends StatelessWidget {
   final UIState uiState;
   final double unit;
+  final ClockMode clockMode;
 
-  const MiciTopRow({super.key, required this.uiState, required this.unit});
+  const MiciTopRow({super.key, required this.uiState, required this.unit, required this.clockMode});
 
   @override
   Widget build(BuildContext context) {
@@ -345,7 +340,12 @@ class MiciTopRow extends StatelessWidget {
         gap,
         _speed(),
         gap,
-        const Spacer(),
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: clockMode != ClockMode.off ? _clock() : const SizedBox.shrink(),
+          ),
+        ),
       ],
     );
   }
@@ -370,6 +370,17 @@ class MiciTopRow extends StatelessWidget {
                 color: HudColors.whiteTranslucent, fontSize: 14 * unit, fontWeight: FontWeight.w500, height: 1.0),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _clock() {
+    return _pill(
+      unit,
+      height: 40,
+      child: ClockText(
+        mode: clockMode,
+        style: TextStyle(color: HudColors.white, fontSize: 22 * unit, fontWeight: FontWeight.w600, height: 1.0),
       ),
     );
   }
@@ -447,29 +458,34 @@ class MiciWheelPainter extends CustomPainter {
 
 // -- driver monitoring icon --
 
-/// dark disc with an arc over the top in the attention colour; the person glyph is
-/// the painter's child
+/// dark disc with a cone (drawn as an arc) on the side the driver's head is turned
+/// towards; the person glyph is the painter's child. [rotationDeg] is the device's
+/// head rotation, where 90 is straight ahead and puts the cone at the top
 class MiciDriverIconPainter extends CustomPainter {
-  final Color arcColor;
+  final Color? coneColor;  // null: no cone
+  final double rotationDeg;
 
-  const MiciDriverIconPainter({required this.arcColor});
+  const MiciDriverIconPainter({required this.coneColor, required this.rotationDeg});
 
   @override
   void paint(Canvas canvas, Size size) {
     final c = size.center(Offset.zero);
     final r = size.shortestSide / 2;
     canvas.drawCircle(c, r, Paint()..color = _discColor);
+    final color = coneColor;
+    if (color == null) return;
     final arc = Paint()
-      ..color = arcColor
+      ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = r * 0.16
       ..strokeCap = StrokeCap.round;
-    // 100 degrees centred on the top
-    canvas.drawArc(Rect.fromCircle(center: c, radius: r * 0.84), -pi / 2 - 50 * pi / 180, 100 * pi / 180, false, arc);
+    // 100 degrees wide; the device turns its cone image by (rotation - 90) from the top
+    final middle = (rotationDeg - 180) * pi / 180;
+    canvas.drawArc(Rect.fromCircle(center: c, radius: r * 0.84), middle - 50 * pi / 180, 100 * pi / 180, false, arc);
   }
 
   @override
-  bool shouldRepaint(MiciDriverIconPainter old) => old.arcColor != arcColor;
+  bool shouldRepaint(MiciDriverIconPainter old) => old.coneColor != coneColor || old.rotationDeg != rotationDeg;
 }
 
 // -- torque bar (mici/onroad/torque_bar.py) --

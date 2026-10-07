@@ -1,9 +1,12 @@
 // comma four style extended layout: geometry, torque bar value, and the widget tree
 
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:opview/common/transformations.dart';
 import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
+import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/mici/mici_extended_layout.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
@@ -64,19 +67,112 @@ void main() {
     expect(s.steeringAngleDeg, -12.5);
   });
 
-  test('driver monitoring arc colour', () {
-    expect(miciDriverArcColor(faceDetected: true, distracted: false), const Color(0xFF17C653));
-    expect(miciDriverArcColor(faceDetected: true, distracted: true), const Color(0xFFFF7300));
-    expect(miciDriverArcColor(faceDetected: false, distracted: false), const Color(0xFF8C8C8C));
+  group('driver monitoring', () {
+    test('cone colour: green with full attention, orange once it runs down', () {
+      expect(miciDriverConeColor(awarenessFull: true), const Color(0xFF00FF40));
+      expect(miciDriverConeColor(awarenessFull: false), const Color(0xFFFF7300));
+    });
+
+    test('current openpilot message: policy, face, awareness and head direction', () {
+      final s = UIState();
+      expect(s.dmSeen, false);
+      const msg = '{"type": "driverMonitoringState", "data": {"activePolicy": "vision", "isRHD": false, '
+          '"visionPolicyState": {"faceDetected": true, "awarenessPercent": 80.0, "pose": {"pitch": 0.0, "yaw": 0.3}}}}';
+      final adapter = CerealAdapter();
+      for (var i = 0; i < 60; i++) {
+        adapter.apply(s, msg);
+      }
+      expect(s.dmSeen, true);
+      expect(s.dmActive, true);
+      expect(s.dmFaceDetected, true);
+      expect(s.dmAwarenessPercent, 80.0);
+      expect(s.dmAwarenessUnfull, true);
+      // 6 degrees of pitch are added and the yaw sign flipped, then atan2(2 * pitch, yaw)
+      final expected = atan2(2 * 6 * pi / 180, -0.3) * 180 / pi;
+      expect(s.dmRotationDeg, closeTo(expected, 0.5));
+    });
+
+    test('looking straight ahead points the cone up', () {
+      final s = UIState();
+      for (var i = 0; i < 60; i++) {
+        s.applyDriverMonitoringState({
+          'activePolicy': 'vision',
+          'visionPolicyState': {'faceDetected': true, 'awarenessPercent': 100.0, 'pose': {'pitch': 0.0, 'yaw': 0.0}},
+        });
+      }
+      expect(s.dmRotationDeg, closeTo(90, 0.5));
+      expect(s.dmAwarenessUnfull, false);
+    });
+
+    test('a policy other than vision is not active', () {
+      final s = UIState();
+      s.applyDriverMonitoringState({'activePolicy': 'wheeltouch', 'visionPolicyState': {'awarenessPercent': 10.0}});
+      expect(s.dmActive, false);
+      expect(s.dmAwarenessUnfull, false);
+    });
+
+    test('older openpilot message with flat fields still works', () {
+      final s = UIState();
+      s.applyDriverMonitoringState({'faceDetected': true, 'isActiveMode': true, 'awarenessStatus': 0.5});
+      expect(s.dmActive, true);
+      expect(s.dmFaceDetected, true);
+      expect(s.dmAwarenessPercent, 50.0);
+      expect(s.dmAwarenessUnfull, true);
+    });
   });
 
-  test('driver monitoring state is read through the adapter', () {
-    final s = UIState();
-    expect(s.dmSeen, false);
-    CerealAdapter().apply(s, '{"type": "driverMonitoringState", "data": {"faceDetected": true, "isDistracted": true}}');
-    expect(s.dmSeen, true);
-    expect(s.dmFaceDetected, true);
-    expect(s.dmDistracted, true);
+  group('confidence', () {
+    test('target by engagement state', () {
+      final s = UIState();
+      s.brakeDisengageProb = 0.2;
+      s.steerOverrideProb = 0.5;
+      s.status = UIStatus.disengaged;
+      expect(s.confidenceTarget, -0.5);
+      s.status = UIStatus.engaged;
+      expect(s.confidenceTarget, closeTo(0.8 * 0.5, 1e-9));
+      s.status = UIStatus.latOnly;
+      expect(s.confidenceTarget, closeTo(0.5, 1e-9));
+      s.status = UIStatus.longOnly;
+      expect(s.confidenceTarget, closeTo(0.8, 1e-9));
+    });
+
+    test('is read from the model message and smoothed', () {
+      final s = UIState();
+      s.status = UIStatus.engaged;
+      expect(s.confidenceSeen, false);
+      final msg = {
+        'meta': {
+          'disengagePredictions': {
+            'brakeDisengageProbs': [0.01, 0.1, 0.05],
+            'steerOverrideProbs': [0.0, 0.2],
+          },
+        },
+      };
+      s.applyModelV2(msg);
+      expect(s.confidenceSeen, true);
+      expect(s.brakeDisengageProb, 0.1);
+      expect(s.steerOverrideProb, 0.2);
+      // one step from -0.5 towards 0.72
+      expect(s.confidenceFiltered, greaterThan(-0.5));
+      expect(s.confidenceFiltered, lessThan(0.0));
+      for (var i = 0; i < 200; i++) {
+        s.applyModelV2(msg);
+      }
+      expect(s.confidenceFiltered, closeTo(0.9 * 0.8, 0.01));
+    });
+
+    test('a model message without the values leaves the ball unsupported', () {
+      final s = UIState();
+      s.applyModelV2({'position': {'x': [1.0], 'y': [0.0], 'z': [0.0]}});
+      expect(s.confidenceSeen, false);
+    });
+
+    test('ball colour follows confidence only while fully engaged', () {
+      expect(miciBallColors(UIStatus.engaged, confidence: 0.9)!.first, const Color(0xFF00FFCC));
+      expect(miciBallColors(UIStatus.engaged, confidence: 0.4)!.first, const Color(0xFFFFC800));
+      expect(miciBallColors(UIStatus.engaged, confidence: 0.1)!.first, const Color(0xFFFF0015));
+      expect(miciBallColors(UIStatus.latOnly, confidence: 0.1)!.first, const Color(0xFF4D9DFF));
+    });
   });
 
   test('colours cover every engagement state', () {
@@ -225,6 +321,54 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: state, settings: _mici())));
       expect(find.byIcon(Icons.person), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the confidence ball rides high when confident and sinks when not', (tester) async {
+      _screen(tester, 1920, 1080);
+      final state = createMockUIState();
+      state.confidenceSeen = true;
+      state.confidenceFiltered = 1.0;
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: state, settings: _mici())));
+      final high = tester.getRect(find.byKey(const ValueKey('miciBall')));
+      expect(high.center.dy, lessThan(1080 * 0.25));
+
+      state.confidenceFiltered = 0.0;
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: state, settings: _mici())));
+      final low = tester.getRect(find.byKey(const ValueKey('miciBall')));
+      expect(low.center.dy, greaterThan(1080 * 0.75));
+      expect(low.right, closeTo(high.right, 0.01));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('without confidence values the ball stays at the bottom', (tester) async {
+      _screen(tester, 1920, 1080);
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: createMockUIState(), settings: _mici())));
+      expect(tester.getRect(find.byKey(const ValueKey('miciBall'))).center.dy, greaterThan(1080 * 0.75));
+    });
+
+    testWidgets('the clock sits in the top row beside the speed', (tester) async {
+      _screen(tester, 1920, 1080);
+      await tester.pumpWidget(MaterialApp(
+        home: AugmentedRoadView(uiState: createMockUIState(), settings: _mici(clock: ClockMode.h24)),
+      ));
+      final clock = find.descendant(of: find.byType(MiciTopRow), matching: find.byType(ClockText));
+      expect(clock, findsOneWidget);
+      expect(tester.getRect(clock).left, greaterThan(tester.getRect(find.text('km/h')).right));
+    });
+
+    testWidgets('the driver icon is hidden while an alert is showing', (tester) async {
+      _screen(tester, 1920, 1080);
+      final state = createMockUIState();
+      state.applyDriverMonitoringState({'faceDetected': true});
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: state, settings: _mici())));
+      expect(find.byIcon(Icons.person), findsOneWidget);
+      state.alertSize = 1;
+      state.alertText1 = 'Pay Attention';
+      final errors = FlutterError.onError;
+      FlutterError.onError = (_) {};  // the Classic alert can overflow with the test font
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: state, settings: _mici())));
+      FlutterError.onError = errors;
+      expect(find.byIcon(Icons.person), findsNothing);
     });
 
     testWidgets('disengaged hides the status ball colours but still draws', (tester) async {
