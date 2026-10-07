@@ -8,8 +8,8 @@
 //   - steering wheel icon, bottom left, turning with the steering angle
 //   - torque bar, bottom centre
 //   - status ball, bottom right
-// and, as extras for a larger screen, set speed and speed limit either side of the
-// speed pill, the road name under it, and the clock top right.
+// and, as extras for a larger screen, the set speed beside the speed pill, the road
+// name under it, and the clock top right.
 //
 // device measurements are in comma four pixels (240 tall), scaled by `unit`.
 //
@@ -27,7 +27,6 @@ import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/exp_button.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
-import 'package:opview/selfdrive/ui/onroad/speed_limit_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/turn_signal_renderer.dart';
 import 'package:opview/services/app_settings.dart';
 
@@ -345,8 +344,8 @@ Widget _roadName(String name, double unit, double screenW) {
 
 // -- top row --
 
-/// speed in a dark pill at top centre; set speed to its left and the speed limit
-/// sign to its right, so the speed stays centred whatever is shown beside it
+/// speed in a dark pill at top centre, with the set speed to its left; the speed
+/// stays centred whether or not the set speed is shown
 class MiciTopRow extends StatelessWidget {
   final UIState uiState;
   final double unit;
@@ -369,12 +368,7 @@ class MiciTopRow extends StatelessWidget {
         gap,
         _speed(),
         gap,
-        Expanded(
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: st.showSpeedLimit ? _speedLimit() : const SizedBox.shrink(),
-          ),
-        ),
+        const Spacer(),
       ],
     );
   }
@@ -437,57 +431,6 @@ class MiciTopRow extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-
-  /// round European sign for metric, rectangular US sign for imperial
-  Widget _speedLimit() {
-    final sign = SpeedLimitSign.from(uiState);
-    final value = Text(
-      sign.value,
-      style: TextStyle(color: sign.textColor, fontSize: 46, fontWeight: FontWeight.bold, height: 1.0),
-    );
-    final Widget drawn;
-    if (uiState.isMetric) {
-      drawn = Container(
-        width: 110,
-        height: 110,
-        padding: const EdgeInsets.all(22),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: SpeedLimitColors.white,
-          border: Border.all(color: SpeedLimitColors.red, width: 12),
-        ),
-        child: FittedBox(fit: BoxFit.scaleDown, child: value),
-      );
-    } else {
-      const label = TextStyle(color: SpeedLimitColors.black, fontSize: 13, fontWeight: FontWeight.bold, height: 1.1);
-      drawn = Container(
-        width: 90,
-        height: 110,
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: SpeedLimitColors.white,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: SpeedLimitColors.black, width: 3),
-        ),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('SPEED', style: label),
-              const Text('LIMIT', style: label),
-              value,
-            ],
-          ),
-        ),
-      );
-    }
-    // drawn at a fixed size, then scaled to the height of the row
-    return SizedBox(
-      height: miciSpeedPillHeight * unit,
-      child: FittedBox(fit: BoxFit.contain, child: drawn),
     );
   }
 }

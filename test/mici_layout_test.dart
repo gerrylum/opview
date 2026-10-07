@@ -187,21 +187,22 @@ void main() {
       }
     });
 
-    testWidgets('imperial units use the US sign and mph', (tester) async {
+    testWidgets('imperial units show mph, and no speed limit sign is drawn', (tester) async {
       _screen(tester, 1920, 1080);
       final state = createMockUIState();
       state.isMetric = false;
       state.paramsSeen = true;
       state.speedLimitMode = 1;
       state.speedLimitValid = true;
-      state.speedLimitLast = 17.88;  // 40 mph
-      state.speedLimitFinalLast = 17.88;
+      state.speedLimitLast = 13.4;  // 30 mph
+      state.speedLimitFinalLast = 13.4;
       await tester.pumpWidget(MaterialApp(
         home: AugmentedRoadView(uiState: state, settings: _mici()),
       ));
       expect(find.text('mph'), findsOneWidget);
-      expect(find.text('SPEED'), findsOneWidget);
-      expect(find.text('40'), findsWidgets);
+      expect(find.text('40'), findsOneWidget);  // 18 m/s
+      expect(find.text('30'), findsNothing);
+      expect(find.text('SPEED'), findsNothing);
       expect(tester.takeException(), isNull);
     });
 
