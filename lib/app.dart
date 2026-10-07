@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
+import 'package:opview/services/app_settings.dart';
 import 'package:opview/services/connection_manager.dart';
 
 class OpviewApp extends StatefulWidget {
@@ -16,6 +17,7 @@ class OpviewApp extends StatefulWidget {
 class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
   late final UIState _uiState;
   late final ConnectionManager _connectionManager;
+  final AppSettings _settings = AppSettings();
 
   @override
   void initState() {
@@ -24,6 +26,7 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
     _uiState = UIState();
     _connectionManager = ConnectionManager(_uiState);
     _connectionManager.start();
+    _settings.load();
   }
 
   @override
@@ -32,6 +35,7 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
     // async cleanup — best-effort, State.dispose() is sync
     _connectionManager.dispose();
     _uiState.dispose();
+    _settings.dispose();
     super.dispose();
   }
 
@@ -56,12 +60,13 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
         scaffoldBackgroundColor: Colors.black,
       ),
       home: ListenableBuilder(
-        listenable: _uiState,
+        listenable: Listenable.merge([_uiState, _settings]),
         builder: (context, _) => AugmentedRoadView(
           uiState: _uiState,
           videoRenderer: _connectionManager.videoRenderer,
           loadManualHost: _connectionManager.loadManualHost,
           onSetManualHost: _connectionManager.setManualHost,
+          settings: _settings,
         ),
       ),
     );

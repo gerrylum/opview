@@ -15,6 +15,9 @@ import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/alert_renderer.dart';
+import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
+import 'package:opview/selfdrive/ui/settings/settings_dialog.dart';
+import 'package:opview/services/app_settings.dart';
 
 // which build this is, shown on the Connecting screen; set at build time with
 // flutter build apk --dart-define=OPVIEW_BUILD=0.1.1-comma3x.N
@@ -39,12 +42,16 @@ class AugmentedRoadView extends StatefulWidget {
   final Future<String?> Function()? loadManualHost;
   final Future<void> Function(String? host)? onSetManualHost;
 
+  // viewer-side settings (clock, ...); null = everything at its default
+  final AppSettings? settings;
+
   const AugmentedRoadView({
     super.key,
     required this.uiState,
     this.videoRenderer,
     this.loadManualHost,
     this.onSetManualHost,
+    this.settings,
   });
 
   @override
@@ -82,9 +89,16 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
           screenW - 2 * borderSize, screenH - 2 * borderSize,
         );
 
+        final settings = widget.settings;
+        final clockMode = settings?.clockMode ?? ClockMode.off;
+
         return MediaQuery(
           data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
-          child: Stack(
+          // long press anywhere opens the settings
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onLongPress: settings == null ? null : () => showSettingsDialog(context, settings),
+            child: Stack(
             fit: StackFit.expand,
             children: [
               // layer 0 + 1a: video + model overlay
@@ -111,6 +125,7 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
                       fit: StackFit.expand,
                       children: [
                         HudRenderer(uiState: widget.uiState, scale: scale),
+                        if (clockMode != ClockMode.off) ClockRenderer(mode: clockMode, scale: scale),
                         AlertRenderer(uiState: widget.uiState, scale: scale),
                       ],
                     ),
@@ -169,10 +184,19 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
                           ),
                         ),
                       ],
+                      if (settings != null)
+                        TextButton(
+                          onPressed: () => showSettingsDialog(context, settings),
+                          child: Text(
+                            'Settings',
+                            style: TextStyle(color: const Color(0x99FFFFFF), fontSize: 20 * scale),
+                          ),
+                        ),
                     ],
                   ),
                 ),
             ],
+            ),
           ),
         );
       }),
