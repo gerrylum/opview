@@ -1,18 +1,19 @@
 // comma four style layout, extended for a larger screen
 //
-// the main area follows the comma four's own driving screen (openpilot
-// selfdrive/ui/mici/onroad): a rounded camera view in the device's 536x240 shape,
-// a status ball in a strip on its right, the steering wheel icon bottom left and
-// the torque bar along the bottom. The comma four shows no permanent speed, so the
-// screen space left over holds an information panel: speed, set speed, speed limit,
-// road name and clock.
+// the camera fills the whole screen and everything else is drawn over it. The
+// overlay follows the comma four's own driving screen (openpilot
+// selfdrive/ui/mici/onroad): the device's zoom, the steering wheel icon bottom
+// left, the torque bar along the bottom, a status ball, and a rounded border in
+// the engagement colour. The comma four shows no permanent speed, so a column on
+// the right adds what a larger screen has room for: clock, speed, set speed and
+// speed limit. The road name sits top centre.
 //
-// all device measurements are in comma four pixels (240 tall), scaled by `unit`.
+// device measurements are in comma four pixels (240 tall), scaled by `unit`.
 //
 // not ported yet: the device's own path and lane line style (the Classic overlay is
 // drawn instead), the driver monitoring face, the brief set speed pop-up, and the
 // confidence ball's rise and fall (opview is not sent the model's confidence values,
-// so the ball shows engagement state only, at a fixed height).
+// so the ball shows engagement state only, at a fixed place).
 
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -23,6 +24,7 @@ import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/exp_button.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
+import 'package:opview/selfdrive/ui/onroad/road_name_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/speed_limit_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/turn_signal_renderer.dart';
 import 'package:opview/services/app_settings.dart';
@@ -31,7 +33,6 @@ import 'package:opview/services/app_settings.dart';
 
 const miciScreenWidth = 536.0;
 const miciScreenHeight = 240.0;
-const miciSidePanelWidth = 60.0;   // SIDE_PANEL_WIDTH
 const miciCornerRadius = 24.0;     // rounded border, roundness 0.2 of a 240 px side
 const miciBallRadius = 24.0;       // status_dot_radius
 const miciWheelSize = 50.0;
@@ -85,45 +86,18 @@ List<Color>? miciBallColors(UIStatus status) {
 
 // -- geometry --
 
-/// where the comma four screen and the information panel go on a screen of a given size
-class MiciGeometry {
-  final Rect device;        // comma four screen: camera view plus status strip
-  final Rect info;          // information panel
-  final bool infoVertical;  // panel is a column at the side (true) or a row below (false)
+/// share of the screen width used by the information column on the right
+const miciInfoWidthFraction = 0.2;
 
-  const MiciGeometry(this.device, this.info, this.infoVertical);
+/// share of the screen height used by the information column; the status ball
+/// sits in the corner below it
+const miciInfoHeightFraction = 0.78;
 
-  /// comma four pixel size on this screen
-  double get unit => device.height / miciScreenHeight;
-
-  static MiciGeometry compute(Size screen) {
-    const aspect = miciScreenWidth / miciScreenHeight;
-    final w = screen.width, h = screen.height;
-
-    // full width with the panel below, if that leaves the panel a usable height
-    final below = h - w / aspect;
-    if (below >= 0.16 * h) {
-      return MiciGeometry(
-        Rect.fromLTWH(0, 0, w, w / aspect),
-        Rect.fromLTWH(0, w / aspect, w, below),
-        false,
-      );
-    }
-
-    // otherwise the panel goes at the side, at least a fifth of the width
-    final panelW = max(w - h * aspect, 0.2 * w);
-    final deviceW = w - panelW;
-    final deviceH = deviceW / aspect;
-    return MiciGeometry(
-      Rect.fromLTWH(0, (h - deviceH) / 2, deviceW, deviceH),
-      Rect.fromLTWH(deviceW, 0, panelW, h),
-      true,
-    );
-  }
-}
+/// comma four pixel size on a screen: its 536x240 display scaled to fit inside
+double miciUnit(Size screen) => min(screen.height / miciScreenHeight, screen.width / miciScreenWidth);
 
 /// video placement and overlay transform for a camera view of [w] x [h];
-/// zooms are the comma four's own, [scale] is this view's height over 240
+/// zooms are the comma four's own, [scale] is the comma four pixel size
 typedef MiciFrameBuilder = FrameTransform Function(
   double w,
   double h, {
@@ -151,135 +125,138 @@ class MiciExtendedLayout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
-      final geo = MiciGeometry.compute(Size(constraints.maxWidth, constraints.maxHeight));
-      return Stack(
-        children: [
-          Positioned.fromRect(rect: geo.device, child: _deviceScreen(geo)),
-          Positioned.fromRect(
-            rect: geo.info,
-            child: MiciInfoPanel(uiState: uiState, clockMode: clockMode, vertical: geo.infoVertical),
-          ),
-        ],
+      final st = uiState;
+      final w = constraints.maxWidth, h = constraints.maxHeight;
+      final unit = miciUnit(Size(w, h));
+      final radius = BorderRadius.circular(miciCornerRadius * unit);
+
+      final frame = frameFor(
+        w,
+        h,
+        roadZoom: miciRoadZoom(st.vEgo),
+        wideZoom: miciWideZoom,
+        scale: unit,
       );
-    });
-  }
 
-  /// the comma four screen: camera view on the left, status ball strip on the right
-  Widget _deviceScreen(MiciGeometry geo) {
-    final st = uiState;
-    final unit = geo.unit;
-    final viewW = geo.device.width - miciSidePanelWidth * unit;
-    final viewH = geo.device.height;
-    final radius = BorderRadius.circular(miciCornerRadius * unit);
+      // alerts, turn signals and the road name are the Classic ones
+      final classicScale = h / 1080.0;
+      final ball = miciBallColors(st.status);
+      final tint = wheelTint(st.lateralMode) ?? Colors.white;
+      final infoW = w * miciInfoWidthFraction;
 
-    final frame = frameFor(
-      viewW,
-      viewH,
-      roadZoom: miciRoadZoom(st.vEgo),
-      wideZoom: miciWideZoom,
-      scale: unit,
-    );
-
-    // alerts and turn signals are the Classic ones, sized for this view
-    final classicScale = viewH / 1080.0;
-    final ball = miciBallColors(st.status);
-    final tint = wheelTint(st.lateralMode) ?? Colors.white;
-
-    return Stack(
-      children: [
-        Positioned(
-          left: 0,
-          top: 0,
-          width: viewW,
-          height: viewH,
-          child: ClipRRect(
-            borderRadius: radius,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                videoBuilder(frame),
-                CustomPaint(
-                  painter: ModelRendererPainter(
-                    state: st,
-                    carSpaceTransform: frame.carToScreen,
-                    contentRect: Rect.fromLTWH(0, 0, viewW, viewH),
-                  ),
-                ),
-                // fade out the bottom of the overlay, as the device does
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  height: viewH * 0.35,
-                  child: const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Color(0x00000000), Color(0x99000000)],
-                      ),
-                    ),
-                  ),
-                ),
-                CustomPaint(
-                  painter: MiciTorqueBarPainter(value: st.torqueBarValue, status: st.status, unit: unit),
-                ),
-                Positioned.fill(child: TurnSignalRenderer(uiState: st, scale: classicScale)),
-                if (st.status != UIStatus.disengaged)
-                  Positioned(
-                    left: 21 * unit,
-                    bottom: 14 * unit,
-                    width: miciWheelSize * unit,
-                    height: miciWheelSize * unit,
-                    child: Transform.rotate(
-                      angle: -st.steeringAngleDeg * pi / 180,
-                      child: Image.asset(
-                        'assets/icons/chffr_wheel.png',
-                        color: tint.withAlpha(230),
-                        colorBlendMode: BlendMode.modulate,
-                      ),
-                    ),
-                  ),
-                AlertRenderer(uiState: st, scale: classicScale),
-              ],
+      return ClipRRect(
+        borderRadius: radius,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // camera over the whole screen, with the path and lane lines
+            videoBuilder(frame),
+            CustomPaint(
+              painter: ModelRendererPainter(
+                state: st,
+                carSpaceTransform: frame.carToScreen,
+                contentRect: Rect.fromLTWH(0, 0, w, h),
+              ),
             ),
-          ),
-        ),
 
-        // border in the engagement colour
-        Positioned(
-          left: 0,
-          top: 0,
-          width: viewW,
-          height: viewH,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: radius,
-              border: Border.all(color: miciBorderColor(st.status), width: 4 * unit),
-            ),
-          ),
-        ),
-
-        // status ball
-        if (ball != null)
-          Positioned(
-            left: geo.device.width - 2 * miciBallRadius * unit,
-            top: viewH / 2 - miciBallRadius * unit,
-            width: 2 * miciBallRadius * unit,
-            height: 2 * miciBallRadius * unit,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: ball,
+            // fade out the bottom of the overlay, as the device does
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: h * 0.35,
+              child: const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x00000000), Color(0x99000000)],
+                  ),
                 ),
               ),
             ),
-          ),
-      ],
-    );
+
+            // darken the right edge so the information column stays readable
+            Positioned(
+              top: 0,
+              bottom: 0,
+              right: 0,
+              width: infoW * 1.6,
+              child: const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: [Color(0x00000000), Color(0xA6000000)],
+                  ),
+                ),
+              ),
+            ),
+
+            CustomPaint(
+              painter: MiciTorqueBarPainter(value: st.torqueBarValue, status: st.status, unit: unit),
+            ),
+            Positioned.fill(child: TurnSignalRenderer(uiState: st, scale: classicScale)),
+            RoadNameRenderer(uiState: st, scale: classicScale),
+
+            // steering wheel
+            if (st.status != UIStatus.disengaged)
+              Positioned(
+                left: 21 * unit,
+                bottom: 14 * unit,
+                width: miciWheelSize * unit,
+                height: miciWheelSize * unit,
+                child: Transform.rotate(
+                  angle: -st.steeringAngleDeg * pi / 180,
+                  child: Image.asset(
+                    'assets/icons/chffr_wheel.png',
+                    color: tint.withAlpha(230),
+                    colorBlendMode: BlendMode.modulate,
+                  ),
+                ),
+              ),
+
+            // information column
+            Positioned(
+              top: 0,
+              right: 0,
+              width: infoW,
+              height: h * miciInfoHeightFraction,
+              child: MiciInfoPanel(uiState: st, clockMode: clockMode),
+            ),
+
+            // status ball, bottom right
+            if (ball != null)
+              Positioned(
+                right: 14 * unit,
+                bottom: 14 * unit,
+                width: 2 * miciBallRadius * unit,
+                height: 2 * miciBallRadius * unit,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: ball,
+                    ),
+                  ),
+                ),
+              ),
+
+            AlertRenderer(uiState: st, scale: classicScale),
+
+            // border in the engagement colour, on top of everything
+            DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: radius,
+                border: Border.all(color: miciBorderColor(st.status), width: 4 * unit),
+              ),
+            ),
+          ],
+        ),
+      );
+    });
   }
 }
 
@@ -347,32 +324,27 @@ class MiciTorqueBarPainter extends CustomPainter {
 
 // -- information panel --
 
-/// what the comma four screen leaves out: speed, set speed, speed limit, road name, clock.
-/// every item scales to the space it is given, so the panel fits any screen shape
+const _infoShadow = [Shadow(color: Color(0xCC000000), blurRadius: 12)];
+
+/// what the comma four screen leaves out: clock, speed, set speed and speed limit,
+/// drawn over the video. Every item scales to the space it is given
 class MiciInfoPanel extends StatelessWidget {
   final UIState uiState;
   final ClockMode clockMode;
-  final bool vertical;
 
-  const MiciInfoPanel({super.key, required this.uiState, required this.clockMode, required this.vertical});
+  const MiciInfoPanel({super.key, required this.uiState, required this.clockMode});
 
   @override
   Widget build(BuildContext context) {
     final st = uiState;
-    final showClock = clockMode != ClockMode.off;
-    final cells = <Widget>[
-      if (vertical && showClock) _cell(2, _clock()),
-      _cell(3, _speed()),
-      if (st.isCruiseAvailable) _cell(2, _setSpeed()),
-      if (st.showSpeedLimit) _cell(2, _speedLimit()),
-      if (st.showRoadName) _cell(vertical ? 1 : 4, _roadName()),
-      if (!vertical && showClock) _cell(3, _clock()),
-    ];
-    return ColoredBox(
-      color: Colors.black,
-      child: vertical
-          ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: cells)
-          : Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: cells),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (clockMode != ClockMode.off) _cell(2, _clock()),
+        _cell(4, _speed()),
+        if (st.isCruiseAvailable) _cell(3, _setSpeed()),
+        if (st.showSpeedLimit) _cell(3, _speedLimit()),
+      ],
     );
   }
 
@@ -395,13 +367,14 @@ class MiciInfoPanel extends StatelessWidget {
       children: [
         Text(
           '${uiState.displaySpeed.round()}',
-          style: const TextStyle(color: HudColors.white, fontSize: 96, fontWeight: FontWeight.bold, height: 1.0),
+          style: const TextStyle(
+              color: HudColors.white, fontSize: 96, fontWeight: FontWeight.bold, height: 1.0, shadows: _infoShadow),
         ),
         const SizedBox(width: 10),
         Text(
           uiState.isMetric ? 'km/h' : 'mph',
           style: const TextStyle(
-              color: HudColors.whiteTranslucent, fontSize: 30, fontWeight: FontWeight.w500, height: 1.0),
+              color: HudColors.white, fontSize: 30, fontWeight: FontWeight.w500, height: 1.0, shadows: _infoShadow),
         ),
       ],
     );
@@ -425,10 +398,15 @@ class MiciInfoPanel extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text('MAX', style: TextStyle(color: maxColor, fontSize: 24, fontWeight: FontWeight.w600, height: 1.2)),
+        Text(
+          'MAX',
+          style: TextStyle(
+              color: maxColor, fontSize: 24, fontWeight: FontWeight.w600, height: 1.2, shadows: _infoShadow),
+        ),
         Text(
           st.isCruiseSet ? '${st.setSpeed.round()}' : '–',
-          style: TextStyle(color: speedColor, fontSize: 64, fontWeight: FontWeight.bold, height: 1.0),
+          style: TextStyle(
+              color: speedColor, fontSize: 64, fontWeight: FontWeight.bold, height: 1.0, shadows: _infoShadow),
         ),
       ],
     );
@@ -478,18 +456,11 @@ class MiciInfoPanel extends StatelessWidget {
     );
   }
 
-  Widget _roadName() {
-    return Text(
-      uiState.roadName,
-      maxLines: 1,
-      style: const TextStyle(color: HudColors.whiteTranslucent, fontSize: 40, fontWeight: FontWeight.w500, height: 1.0),
-    );
-  }
-
   Widget _clock() {
     return ClockText(
       mode: clockMode,
-      style: const TextStyle(color: HudColors.whiteTranslucent, fontSize: 64, fontWeight: FontWeight.w600, height: 1.0),
+      style: const TextStyle(
+          color: HudColors.white, fontSize: 64, fontWeight: FontWeight.w600, height: 1.0, shadows: _infoShadow),
     );
   }
 }

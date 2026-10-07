@@ -25,46 +25,11 @@ AppSettings _mici({ClockMode clock = ClockMode.off}) {
 }
 
 void main() {
-  group('MiciGeometry', () {
-    test('16:9 screen: full width, panel below', () {
-      final g = MiciGeometry.compute(const Size(1920, 1080));
-      expect(g.infoVertical, false);
-      expect(g.device.left, 0);
-      expect(g.device.top, 0);
-      expect(g.device.width, 1920);
-      expect(g.device.height, closeTo(1920 * 240 / 536, 0.01));
-      expect(g.info.top, closeTo(g.device.bottom, 0.01));
-      expect(g.info.bottom, closeTo(1080, 0.01));
-      expect(g.unit, closeTo(g.device.height / 240, 1e-9));
-    });
-
-    test('4:3 screen: panel below gets the larger share', () {
-      final g = MiciGeometry.compute(const Size(1024, 768));
-      expect(g.infoVertical, false);
-      expect(g.info.height, closeTo(768 - 1024 * 240 / 536, 0.01));
-    });
-
-    test('very wide screen: panel at the side, at least a fifth of the width', () {
-      final g = MiciGeometry.compute(const Size(1280, 480));
-      expect(g.infoVertical, true);
-      expect(g.info.width, closeTo(256, 0.01));
-      expect(g.info.height, 480);
-      expect(g.device.width, closeTo(1024, 0.01));
-      expect(g.device.width / g.device.height, closeTo(536 / 240, 1e-6));
-      // centred vertically
-      expect(g.device.top, closeTo(480 - g.device.bottom, 0.01));
-    });
-
-    test('the device area keeps the comma four shape and stays on screen', () {
-      for (final size in const [Size(1920, 1080), Size(1024, 768), Size(1280, 480), Size(844, 390), Size(1920, 720)]) {
-        final g = MiciGeometry.compute(size);
-        expect(g.device.width / g.device.height, closeTo(536 / 240, 1e-6), reason: '$size');
-        expect(g.device.right, lessThanOrEqualTo(size.width + 0.01), reason: '$size');
-        expect(g.device.bottom, lessThanOrEqualTo(size.height + 0.01), reason: '$size');
-        expect(g.info.width, greaterThan(0), reason: '$size');
-        expect(g.info.height, greaterThan(0), reason: '$size');
-      }
-    });
+  test('comma four pixel size fits its 536x240 screen inside any screen', () {
+    expect(miciUnit(const Size(536, 240)), 1.0);
+    // wide screens are limited by height, tall ones by width
+    expect(miciUnit(const Size(1920, 720)), closeTo(3.0, 1e-9));
+    expect(miciUnit(const Size(1024, 768)), closeTo(1024 / 536, 1e-9));
   });
 
   test('road zoom follows speed as on the device', () {
@@ -159,6 +124,19 @@ void main() {
   });
 
   group('MiciExtendedLayout', () {
+    testWidgets('the camera view fills the whole screen', (tester) async {
+      _screen(tester, 1920, 1080);
+      await tester.pumpWidget(MaterialApp(
+        home: AugmentedRoadView(uiState: createMockUIState(), settings: _mici()),
+      ));
+      expect(tester.getSize(find.byType(MiciExtendedLayout)), const Size(1920, 1080));
+      // the information column lies inside it, on the right
+      final panel = tester.getRect(find.byType(MiciInfoPanel));
+      expect(panel.right, 1920);
+      expect(panel.top, 0);
+      expect(panel.width, closeTo(1920 * miciInfoWidthFraction, 0.01));
+    });
+
     testWidgets('shows speed, set speed and unit in the information panel', (tester) async {
       _screen(tester, 1920, 1080);
       // 18 m/s is 64.8 km/h; cruise set at 80
