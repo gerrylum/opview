@@ -105,7 +105,7 @@ void main() {
   group('settings menu', () {
     test('short names, in the order offered', () {
       expect(clockModeChoices.map(clockModeLabel).toList(), ['Off', '12 hour', '24 hour', 'Auto']);
-      expect(OnroadLayout.values.map(onroadLayoutLabel).toList(), ['Classic', 'Enhanced']);
+      expect(OnroadLayout.values.map(onroadLayoutLabel).toList(), ['Classic', 'Enhanced', 'Detailed']);
     });
 
     Future<void> open(WidgetTester tester, {String? host, bool manual = false, VoidCallback? onChange}) async {

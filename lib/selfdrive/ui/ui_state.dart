@@ -53,6 +53,15 @@ class UIState extends ChangeNotifier {
   bool vEgoClusterSeen = false;
   double steeringAngleDeg = 0.0;
 
+  // carState, for the Detailed layout
+  double aEgo = 0.0;
+  double steeringRateDeg = 0.0;
+  double steeringTorque = 0.0;   // driver torque, in the car's own CAN units
+  bool gasPressed = false;
+  bool brakePressed = false;
+  String gearShifter = '';
+  bool cruiseEnabled = false;
+
   // carControl.actuators.steeringAngleDeg: the angle openpilot is asking for. Cars that
   // steer by torque alone leave it at 0; the Rivian branches always fill it in
   double targetSteeringAngleDeg = 0.0;
@@ -66,12 +75,14 @@ class UIState extends ChangeNotifier {
   int alertSize = 0;     // 0=none, 1=small, 2=mid, 3=full
   int alertStatus = 0;   // 0=normal, 1=userPrompt, 2=critical
   String openpilotState = '';
+  String personality = '';  // relaxed / standard / aggressive
 
   // controlsState
   double vCruiseDEPRECATED = 0.0;
   double curvature = 0.0;
   double desiredCurvature = 0.0;
   String lateralControlKind = '';  // which lateralControlState is set, e.g. 'torqueState'
+  bool lateralSaturated = false;
 
   // carOutput.actuatorsOutput.torque, -1..1
   double torqueOutput = 0.0;
@@ -82,6 +93,7 @@ class UIState extends ChangeNotifier {
   bool dmFaceDetected = false;
   double dmAwarenessPercent = 100.0;
   double dmRotationDeg = 90.0;       // which way the head is turned, smoothed; 90 = straight ahead
+  String dmPolicy = '';              // which monitoring policy is in charge, e.g. 'vision'
 
   // modelV2 — raw lists from cereal
   List<double> pathX = [];
@@ -101,6 +113,7 @@ class UIState extends ChangeNotifier {
   List<double> rpyCalib = [];
   List<double> wideFromDeviceEuler = [];
   String calStatus = '';
+  int calPerc = 0;
   List<double> calibHeight = [];
 
   // radarState
@@ -116,6 +129,14 @@ class UIState extends ChangeNotifier {
 
   // deviceState / roadCameraState — for camera intrinsics lookup
   String deviceType = '';
+
+  // deviceState, for the Detailed layout's device health
+  bool deviceSeen = false;
+  double cpuTempC = 0.0;        // hottest core
+  int memoryUsagePercent = 0;
+  double freeSpacePercent = 100.0;
+  String networkStrength = 'unknown';  // unknown / poor / moderate / good / great
+  double powerDrawW = 0.0;
   String sensor = '';
 
   // is_metric (default true, like stock); replaced by the device's IsMetric once opviewParams arrives
@@ -167,8 +188,17 @@ class UIState extends ChangeNotifier {
   String brand = '';
   int carFlags = 0;
   bool latActive = false;
+  bool longActive = false;
+  double accelCommand = 0.0;  // carControl.actuators.accel, m/s^2
   int _zeroTorqueCount = zeroTorqueHold;
   LateralMode? lateralMode;
+
+  // the last ten seconds of lateral and longitudinal acceleration, one sample per
+  // modelV2 (about 20 a second), oldest first; for the Detailed layout's traces
+  final latAccelWantHistory = <double>[];
+  final latAccelGotHistory = <double>[];
+  final accelCommandHistory = <double>[];
+  final accelActualHistory = <double>[];
 
   // active camera: 'road' or 'wideRoad' (switches on experimental mode)
   String streamType = 'road';
@@ -216,6 +246,14 @@ class UIState extends ChangeNotifier {
     rightBlinker = right;
     leftBlindspot = data['leftBlindspot'] as bool? ?? false;
     rightBlindspot = data['rightBlindspot'] as bool? ?? false;
+    aEgo = (data['aEgo'] as num?)?.toDouble() ?? 0.0;
+    steeringRateDeg = (data['steeringRateDeg'] as num?)?.toDouble() ?? 0.0;
+    steeringTorque = (data['steeringTorque'] as num?)?.toDouble() ?? 0.0;
+    gasPressed = data['gasPressed'] as bool? ?? false;
+    brakePressed = data['brakePressed'] as bool? ?? false;
+    gearShifter = data['gearShifter'] as String? ?? '';
+    final cruise = data['cruiseState'];
+    cruiseEnabled = cruise is Map && cruise['enabled'] == true;
     // no notify — picked up on next modelV2
   }
 
@@ -228,6 +266,7 @@ class UIState extends ChangeNotifier {
     alertSize = _alertSizeFromString(data['alertSize']);
     alertStatus = _alertStatusFromString(data['alertStatus']);
     openpilotState = data['state'] as String? ?? '';
+    personality = data['personality'] as String? ?? '';
 
     // update engagement status
     started = true;
@@ -241,6 +280,8 @@ class UIState extends ChangeNotifier {
     desiredCurvature = (data['desiredCurvature'] as num?)?.toDouble() ?? 0.0;
     final lat = data['lateralControlState'];
     lateralControlKind = (lat is Map && lat.isNotEmpty) ? '${lat.keys.first}' : '';
+    final latState = (lat is Map && lat.isNotEmpty) ? lat.values.first : null;
+    lateralSaturated = latState is Map && latState['saturated'] == true;
     // no notify — picked up on next modelV2
   }
 
@@ -271,6 +312,7 @@ class UIState extends ChangeNotifier {
     final target = allowThrottle ? 1.0 : 0.0;
     throttleBlend = throttleBlend + k * (target - throttleBlend);
 
+    _recordHistory();
     _notify();  // data-driven: render on modelV2 arrival
   }
 
@@ -278,6 +320,7 @@ class UIState extends ChangeNotifier {
     _fillDoubles(rpyCalib, data['rpyCalib']);
     _fillDoubles(wideFromDeviceEuler, data['wideFromDeviceEuler']);
     calStatus = data['calStatus'] as String? ?? '';
+    calPerc = (data['calPerc'] as num?)?.toInt() ?? calPerc;
     _fillDoubles(calibHeight, data['height']);
     // no notify — picked up on next modelV2
   }
@@ -296,6 +339,15 @@ class UIState extends ChangeNotifier {
   void applyDeviceState(Map<String, dynamic> data) {
     deviceType = data['deviceType'] as String? ?? '';
     started = data['started'] as bool? ?? started;
+    deviceSeen = true;
+    final temps = data['cpuTempC'];
+    if (temps is List && temps.isNotEmpty) {
+      cpuTempC = temps.map((t) => (t as num?)?.toDouble() ?? 0.0).reduce(math.max);
+    }
+    memoryUsagePercent = (data['memoryUsagePercent'] as num?)?.toInt() ?? memoryUsagePercent;
+    freeSpacePercent = (data['freeSpacePercent'] as num?)?.toDouble() ?? freeSpacePercent;
+    networkStrength = data['networkStrength'] as String? ?? 'unknown';
+    powerDrawW = (data['powerDrawW'] as num?)?.toDouble() ?? powerDrawW;
     // no notify — picked up on next modelV2
   }
 
@@ -402,6 +454,7 @@ class UIState extends ChangeNotifier {
     if (vision is Map) {
       // current openpilot: one state per monitoring policy
       dmActive = data['activePolicy'] == 'vision';
+      dmPolicy = data['activePolicy'] as String? ?? '';
       dmFaceDetected = vision['faceDetected'] as bool? ?? false;
       dmAwarenessPercent = (vision['awarenessPercent'] as num?)?.toDouble() ?? 100.0;
       final pose = vision['pose'];
@@ -431,6 +484,8 @@ class UIState extends ChangeNotifier {
 
   void applyCarControl(Map<String, dynamic> data) {
     latActive = data['latActive'] as bool? ?? false;
+    longActive = data['longActive'] as bool? ?? false;
+    accelCommand = (data['actuators']?['accel'] as num?)?.toDouble() ?? 0.0;
     targetSteeringAngleDeg = (data['actuators']?['steeringAngleDeg'] as num?)?.toDouble() ?? 0.0;
   }
 
@@ -531,6 +586,25 @@ class UIState extends ChangeNotifier {
 
   /// is cruise available (not -1)
   bool get isCruiseAvailable => _rawSetSpeed != -1;
+
+  /// sideways acceleration openpilot wants and what the car is doing, m/s^2, from
+  /// controlsState's curvatures; the same in angle and torque mode
+  double get latAccelWant => desiredCurvature * vEgo * vEgo;
+  double get latAccelGot => curvature * vEgo * vEgo;
+
+  /// samples kept for the Detailed layout's traces: ten seconds at the model rate
+  static const historyLength = 200;
+
+  void _recordHistory() {
+    void push(List<double> list, double v) {
+      list.add(v.isFinite ? v : 0.0);
+      if (list.length > historyLength) list.removeAt(0);
+    }
+    push(latAccelWantHistory, latActive ? latAccelWant : 0.0);
+    push(latAccelGotHistory, latAccelGot);
+    push(accelCommandHistory, longActive ? accelCommand : 0.0);
+    push(accelActualHistory, aEgo);
+  }
 
   // -- helpers --
 

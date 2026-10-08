@@ -16,6 +16,7 @@ import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/alert_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
+import 'package:opview/selfdrive/ui/onroad/detailed/detailed_layout.dart';
 import 'package:opview/selfdrive/ui/onroad/enhanced/enhanced_layout.dart';
 import 'package:opview/selfdrive/ui/settings/settings_dialog.dart';
 import 'package:opview/services/app_settings.dart';
@@ -107,7 +108,14 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
             child: Stack(
             fit: StackFit.expand,
             children: [
-              if (layout == OnroadLayout.enhanced)
+              if (layout == OnroadLayout.detailed)
+                DetailedLayout(
+                  uiState: widget.uiState,
+                  clockMode: clockMode,
+                  frameFor: _fullScreenFrame,
+                  videoBuilder: _videoLayer,
+                )
+              else if (layout == OnroadLayout.enhanced)
                 EnhancedLayout(
                   uiState: widget.uiState,
                   clockMode: clockMode,

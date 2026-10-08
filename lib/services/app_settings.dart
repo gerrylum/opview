@@ -25,7 +25,7 @@ String clockModeLabel(ClockMode mode) {
 const clockModeChoices = [ClockMode.off, ClockMode.h12, ClockMode.h24, ClockMode.system];
 
 /// which driving display to draw
-enum OnroadLayout { classic, enhanced }
+enum OnroadLayout { classic, enhanced, detailed }
 
 String onroadLayoutLabel(OnroadLayout layout) {
   switch (layout) {
@@ -33,6 +33,8 @@ String onroadLayoutLabel(OnroadLayout layout) {
       return 'Classic';
     case OnroadLayout.enhanced:
       return 'Enhanced';
+    case OnroadLayout.detailed:
+      return 'Detailed';
   }
 }
 
