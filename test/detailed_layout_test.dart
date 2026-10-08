@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
 import 'package:opview/selfdrive/ui/onroad/detailed/detailed_layout.dart';
 import 'package:opview/selfdrive/ui/onroad/enhanced/enhanced_layout.dart';
+import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
 import 'package:opview/services/impl/cereal_adapter.dart';
@@ -177,6 +178,19 @@ void main() {
       expect(find.descendant(of: panel, matching: find.text('1.7 s')), findsOneWidget);
       await tester.pumpWidget(_app(createMockUIState(engaged: false), _detailed()));
       expect(find.descendant(of: panel, matching: find.text(enhancedNoLeadValue)), findsNWidgets(6));
+    });
+
+    testWidgets('path is drawn like Enhanced: more solid and further out', (tester) async {
+      _screen(tester, 1920, 1080);
+      await tester.pumpWidget(_app(createMockUIState(), _detailed()));
+      final painter = tester
+          .widgetList<CustomPaint>(find.byType(CustomPaint))
+          .map((p) => p.painter)
+          .whereType<ModelRendererPainter>()
+          .single;
+      expect(painter.pathOpacity, enhancedPathOpacity);
+      expect(painter.maxPathDistance, enhancedPathDistance);
+      expect(painter.pathFadeStop, enhancedPathFadeStop);
     });
 
     testWidgets('alerts still show over the panels', (tester) async {

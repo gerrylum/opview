@@ -91,6 +91,15 @@ class ModelRendererPainter extends CustomPainter {
 
   /// draw lead car markers at all (Enhanced turns them off while disengaged)
   final bool showLeads;
+
+  /// path fill strength: 1 is stock; above 1 is more solid (alpha scaled, capped at opaque)
+  final double pathOpacity;
+
+  /// how far ahead the path and lane lines are drawn at most, metres (stock 100)
+  final double maxPathDistance;
+
+  /// where along the path, 0 near to 1 far, its fade to nothing begins in earnest (stock 0.5)
+  final double pathFadeStop;
   final int _version;
 
   ModelRendererPainter({
@@ -101,6 +110,9 @@ class ModelRendererPainter extends CustomPainter {
     this.leadReticle = false,
     this.leadTagMinTop = 0,
     this.showLeads = true,
+    this.pathOpacity = 1.0,
+    this.maxPathDistance = maxDrawDistance,
+    this.pathFadeStop = 0.5,
   }) : _version = state.version;
 
   // working data — rebuilt each paint
@@ -124,7 +136,7 @@ class ModelRendererPainter extends CustomPainter {
 
     // max draw distance from path end
     final pathX = state.pathX;
-    var maxDist = pathX.last.clamp(minDrawDistance, maxDrawDistance);
+    var maxDist = pathX.last.clamp(minDrawDistance, maxPathDistance);
     final maxIdx = _getPathLengthIdx(state.laneLineX[0], maxDist);
 
     // project lane lines
@@ -190,9 +202,9 @@ class ModelRendererPainter extends CustomPainter {
     final blend = state.throttleBlend.clamp(0.0, 1.0);
     final colors = [
       for (int i = 0; i < throttleColors.length; i++)
-        Color.lerp(noThrottleColors[i], throttleColors[i], blend)!,
+        _stronger(Color.lerp(noThrottleColors[i], throttleColors[i], blend)!),
     ];
-    _drawGradientPolygon(canvas, pathPoly, colors, [0.0, 0.5, 1.0]);
+    _drawGradientPolygon(canvas, pathPoly, colors, [0.0, pathFadeStop, 1.0]);
   }
 
   /// bright thin line along each side of the path, fading with distance like the fill.
@@ -219,7 +231,7 @@ class ModelRendererPainter extends CustomPainter {
         Offset(0, maxY),
         Offset(0, minY),
         [base.withAlpha(242), base.withAlpha(191), base.withAlpha(0)],
-        [0.0, 0.5, 1.0],
+        [0.0, pathFadeStop, 1.0],
       );
 
     final left = ui.Path()..addPolygon(pathPoly.sublist(0, half), false);
@@ -249,7 +261,11 @@ class ModelRendererPainter extends CustomPainter {
       final pathHue = (60 + state.accelerationX[i] * 35).clamp(0.0, 120.0);
       final saturation = (state.accelerationX[i].abs() * 1.5).clamp(0.0, 1.0);
       final lightness = _lerp(0.95, 0.62, saturation);
-      final alpha = _lerp(0.4, 0.0, ((linGradPoint - 0.375) / 0.375).clamp(0.0, 1.0));
+      // stock fades from 3/8 to 3/4 of the screen height; a later fade stop pushes both out
+      final fadeStart = 0.75 * pathFadeStop, fadeLen = 1.5 * pathFadeStop - fadeStart;
+      final alpha = (_lerp(0.4, 0.0, ((linGradPoint - fadeStart) / fadeLen).clamp(0.0, 1.0)) * pathOpacity)
+          .clamp(0.0, 1.0)
+          .toDouble();
 
       _expColors.add(_hslaToColor(pathHue, saturation, lightness, alpha));
       _expStops.add(linGradPoint);
@@ -261,6 +277,10 @@ class ModelRendererPainter extends CustomPainter {
       _drawPolygon(canvas, pathPoly, const Color.fromARGB(30, 255, 255, 255));
     }
   }
+
+  /// [c] with its alpha scaled by [pathOpacity]
+  Color _stronger(Color c) =>
+      pathOpacity == 1.0 ? c : c.withValues(alpha: (c.a * pathOpacity).clamp(0.0, 1.0).toDouble());
 
   /// draw lead vehicle indicators
   void _drawLeadIndicators(Canvas canvas, List<double> pathX) {

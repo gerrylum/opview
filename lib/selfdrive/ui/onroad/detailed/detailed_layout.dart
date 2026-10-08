@@ -182,6 +182,9 @@ class DetailedLayout extends StatelessWidget {
                 leadReticle: true,
                 leadTagMinTop: hudBottom + 4 * unit,
                 showLeads: enhancedShowsLead(st.status),
+                pathOpacity: enhancedPathOpacity,
+                maxPathDistance: enhancedPathDistance,
+                pathFadeStop: enhancedPathFadeStop,
               ),
             ),
             Positioned(

@@ -324,6 +324,9 @@ void main() {
       expect(painterOf(tester).leadTagMinTop, greaterThan(_edge));
       expect(tester.takeException(), isNull);
       expect(painterOf(tester).showLeads, true);
+      expect(painterOf(tester).pathOpacity, enhancedPathOpacity);
+      expect(painterOf(tester).maxPathDistance, enhancedPathDistance);
+      expect(painterOf(tester).pathFadeStop, enhancedPathFadeStop);
 
       await tester.pumpWidget(_app(createMockUIState(engaged: false), _enhanced()));
       expect(painterOf(tester).showLeads, false);
@@ -331,6 +334,10 @@ void main() {
       await tester.pumpWidget(_app(createMockUIState(), AppSettings()));
       expect(painterOf(tester).pathEdgeLines, false);
       expect(painterOf(tester).leadReticle, false);
+      // Classic keeps the stock path
+      expect(painterOf(tester).pathOpacity, 1.0);
+      expect(painterOf(tester).maxPathDistance, maxDrawDistance);
+      expect(painterOf(tester).pathFadeStop, 0.5);
     });
 
     testWidgets('paints without errors in every state and at every lead distance', (tester) async {

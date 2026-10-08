@@ -43,6 +43,11 @@ const enhancedInfoPillHeight = 20.0;
 const enhancedInfoPillGap = 4.0;
 const enhancedGlowWidth = 70.0;
 
+// path: a bit more solid than stock, drawn further out, and fading later
+const enhancedPathOpacity = 1.35;
+const enhancedPathDistance = 150.0;  // metres; stock 100
+const enhancedPathFadeStop = 0.65;   // stock 0.5
+
 // torque bar (mici torque_bar.py uses a span of 12.7; shortened to clear the readouts)
 const _torqueAngleSpanDeg = 8.0;
 const _torqueRadius = 1200.0;
@@ -148,6 +153,9 @@ class EnhancedLayout extends StatelessWidget {
                 leadReticle: true,
                 leadTagMinTop: hudBottom + 4 * unit,
                 showLeads: enhancedShowsLead(st.status),
+                pathOpacity: enhancedPathOpacity,
+                maxPathDistance: enhancedPathDistance,
+                pathFadeStop: enhancedPathFadeStop,
               ),
             ),
 
