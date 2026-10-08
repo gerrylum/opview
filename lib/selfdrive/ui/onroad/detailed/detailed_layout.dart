@@ -769,9 +769,6 @@ class DetailedDriverPanel extends StatelessWidget {
     return _Panel(
       unit: unit,
       title: 'DRIVER',
-      badge: st.madsSeen
-          ? detailedBadge(unit, st.madsEnabled ? 'MADS ON' : 'MADS OFF', st.madsEnabled ? _green : _dimColor)
-          : null,
       rows: [
         ('Face', !seen ? detailedNoValue : (st.dmFaceDetected ? 'detected' : 'not seen'),
             st.dmFaceDetected ? _green : _orange),
@@ -852,7 +849,8 @@ class DetailedLeadPanel extends StatelessWidget {
     if (two != null && isLeadPresent(two) && (numOf(two, 'dRel') - dRel).abs() > 3.0) {
       second = formatLeadDistance(numOf(two, 'dRel'), st.isMetric);
     }
-    final radar = lead['radar'] == true;
+    // held for a second, so a momentary loss of the radar match does not flicker it
+    final radar = st.leadRadarRecent;
     return _Panel(
       unit: unit,
       title: 'LEAD',

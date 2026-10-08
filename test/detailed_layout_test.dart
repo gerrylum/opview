@@ -105,6 +105,27 @@ void main() {
       expect(s.calPerc, 42);
     });
 
+    test('radar match is held for a second so the badge does not flicker', () {
+      var now = DateTime(2026, 10, 9, 12);
+      final s = UIState()..clock = () => now;
+      Map<String, dynamic> lead(bool radar) => {'leadOne': {'present': true, 'dRel': 30.0, 'radar': radar}};
+      expect(s.leadRadarRecent, false);
+      s.applyRadarState(lead(true));
+      expect(s.leadRadarRecent, true);
+      // the match drops out briefly: still shown as radar
+      now = now.add(const Duration(milliseconds: 400));
+      s.applyRadarState(lead(false));
+      expect(s.leadRadarRecent, true);
+      // a full second without a match: vision only
+      now = now.add(const Duration(milliseconds: 700));
+      s.applyRadarState(lead(false));
+      expect(s.leadRadarRecent, false);
+      // and never with no lead at all
+      s.applyRadarState(lead(true));
+      s.applyRadarState({'leadOne': {'present': false}});
+      expect(s.leadRadarRecent, false);
+    });
+
     test('sideways acceleration comes from the curvatures', () {
       final s = UIState()
         ..vEgo = 20

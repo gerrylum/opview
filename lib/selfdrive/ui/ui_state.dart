@@ -120,6 +120,14 @@ class UIState extends ChangeNotifier {
   Map<String, dynamic>? leadOne;
   Map<String, dynamic>? leadTwo;
 
+  /// when the lead last had a radar match; radard re-matches 20 times a second and
+  /// the match drops out briefly, so the Detailed badge holds it for [leadRadarHold]
+  DateTime? leadRadarSeenAt;
+  static const leadRadarHold = Duration(seconds: 1);
+
+  /// time source, replaceable in tests
+  DateTime Function() clock = DateTime.now;
+
   // longitudinalPlan
   bool allowThrottle = true;
 
@@ -328,6 +336,7 @@ class UIState extends ChangeNotifier {
   void applyRadarState(Map<String, dynamic> data) {
     leadOne = data['leadOne'] as Map<String, dynamic>?;
     leadTwo = data['leadTwo'] as Map<String, dynamic>?;
+    if (isLeadPresent(leadOne) && leadOne!['radar'] == true) leadRadarSeenAt = clock();
     // no notify — picked up on next modelV2
   }
 
@@ -520,6 +529,12 @@ class UIState extends ChangeNotifier {
   Map<String, dynamic>? get activeLead {
     final lead = leadOne;
     return isLeadPresent(lead) ? lead : null;
+  }
+
+  /// the lead has been matched to a radar track within the last [leadRadarHold]
+  bool get leadRadarRecent {
+    final seen = leadRadarSeenAt;
+    return activeLead != null && seen != null && clock().difference(seen) <= leadRadarHold;
   }
 
   /// how openpilot is steering right now, or null when it is not steering.
