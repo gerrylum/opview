@@ -136,7 +136,7 @@ class ModelRendererPainter extends CustomPainter {
     ));
 
     // project path (shorten for lead vehicle)
-    if (state.leadOne != null && state.leadOne!['status'] == true) {
+    if (isLeadPresent(state.leadOne)) {
       final leadD = (state.leadOne!['dRel'] as num).toDouble() * 2.0;
       maxDist = (leadD - min(leadD * 0.35, 10.0)).clamp(0.0, maxDist);
     }
@@ -277,7 +277,7 @@ class ModelRendererPainter extends CustomPainter {
 
     final leads = [state.leadOne, state.leadTwo];
     for (final lead in leads) {
-      if (lead == null || lead['status'] != true) continue;
+      if (lead == null || !isLeadPresent(lead)) continue;
 
       final dRel = (lead['dRel'] as num).toDouble();
       final vRel = (lead['vRel'] as num).toDouble();
@@ -294,7 +294,7 @@ class ModelRendererPainter extends CustomPainter {
   }
 
   Map<String, dynamic>? _activeLead(Map<String, dynamic>? lead) =>
-      (lead != null && lead['status'] == true) ? lead : null;
+      isLeadPresent(lead) ? lead : null;
 
   double _leadNum(Map<String, dynamic> lead, String key) => (lead[key] as num?)?.toDouble() ?? 0.0;
 

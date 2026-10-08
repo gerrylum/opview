@@ -6,8 +6,9 @@ import 'package:flutter/foundation.dart';
 import 'package:opview/services/adapter.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 
-// pre-compiled regex for NaN replacement
-final _nanRegex = RegExp(r'\bNaN\b');
+// pre-compiled regex for NaN / Infinity replacement: Python's json.dumps writes
+// these for non-finite floats, but they are not valid JSON
+final _nanRegex = RegExp(r'\bNaN\b|-?\bInfinity\b');
 
 // max buffer size before forced reset (prevents unbounded growth from malformed data)
 const _maxBufferSize = 256 * 1024; // 256 KB
@@ -52,7 +53,7 @@ class CerealAdapter implements TelemetryAdapter {
 
   bool _tryApply(UIState state, String raw) {
     try {
-      final sanitized = raw.contains('NaN') ? raw.replaceAll(_nanRegex, 'null') : raw;
+      final sanitized = (raw.contains('NaN') || raw.contains('Infinity')) ? raw.replaceAll(_nanRegex, 'null') : raw;
       final json = jsonDecode(sanitized) as Map<String, dynamic>;
       final type = json['type'] as String?;
       final payload = json['data'];

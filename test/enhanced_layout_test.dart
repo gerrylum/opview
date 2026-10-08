@@ -196,6 +196,25 @@ void main() {
       s.applyRadarState({'leadOne': {'status': true, 'dRel': 20.0}});
       expect(s.activeLead, isNotNull);
     });
+
+    test('newer cereal names the lead flag present instead of status', () {
+      final s = UIState();
+      s.applyRadarState({'leadOne': {'present': false, 'dRel': 20.0}});
+      expect(s.activeLead, isNull);
+      s.applyRadarState({'leadOne': {'present': true, 'dRel': 20.0}});
+      expect(s.activeLead, isNotNull);
+      expect(isLeadPresent(null), isFalse);
+    });
+
+    test('a radarState with Infinity in it still arrives', () {
+      final s = UIState();
+      const msg = '{"type": "radarState", "data": {"leadOne": {"present": true, '
+          '"dRel": 20.0, "vRel": -1.0, "aLeadTau": Infinity, "aLeadK": -Infinity}}}';
+      CerealAdapter().apply(s, msg);
+      expect(s.activeLead, isNotNull);
+      expect(s.activeLead!['dRel'], 20.0);
+      expect(s.activeLead!['aLeadTau'], isNull);
+    });
   });
 
   group('alerts', () {

@@ -464,7 +464,7 @@ class UIState extends ChangeNotifier {
   /// the radar's primary lead car, or null when there is none
   Map<String, dynamic>? get activeLead {
     final lead = leadOne;
-    return (lead != null && lead['status'] == true) ? lead : null;
+    return isLeadPresent(lead) ? lead : null;
   }
 
   /// how openpilot is steering right now, or null when it is not steering.
@@ -583,3 +583,9 @@ class UIState extends ChangeNotifier {
   }
 
 }
+
+/// whether a radarState lead (leadOne/leadTwo) reports a car. Upstream
+/// openpilot calls the flag `status`; newer cereal (comma four forks) renamed it
+/// to `present`. Accept either.
+bool isLeadPresent(Map<String, dynamic>? lead) =>
+    lead != null && (lead['present'] == true || lead['status'] == true);
