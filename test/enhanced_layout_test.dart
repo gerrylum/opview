@@ -157,6 +157,12 @@ void main() {
   });
 
   group('lead car', () {
+    test('lead info shows in every state except disengaged', () {
+      for (final s in UIStatus.values) {
+        expect(enhancedShowsLead(s), s != UIStatus.disengaged, reason: '$s');
+      }
+    });
+
     test('urgency rises as the lead gets closer or we close faster', () {
       expect(leadWarnLevel(60, 0), 0.0);          // far away
       expect(leadWarnLevel(60, -20), 0.0);        // far away, however fast we close
@@ -317,6 +323,10 @@ void main() {
       expect(painterOf(tester).leadReticle, true);
       expect(painterOf(tester).leadTagMinTop, greaterThan(_edge));
       expect(tester.takeException(), isNull);
+      expect(painterOf(tester).showLeads, true);
+
+      await tester.pumpWidget(_app(createMockUIState(engaged: false), _enhanced()));
+      expect(painterOf(tester).showLeads, false);
 
       await tester.pumpWidget(_app(createMockUIState(), AppSettings()));
       expect(painterOf(tester).pathEdgeLines, false);
@@ -502,11 +512,31 @@ void main() {
       expect(steering.left, closeTo(1920 - lead.right, 0.01));
     });
 
-    testWidgets('lead readout disappears with no lead car', (tester) async {
+    testWidgets('lead readout stays with dashes when there is no lead car', (tester) async {
       _screen(tester, 1920, 1080);
       await tester.pumpWidget(_app(createMockUIState(leadDRel: 0), _enhanced()));
-      expect(find.text('GAP'), findsNothing);
-      expect(find.text('STEER'), findsOneWidget);
+      final pills = find.byType(EnhancedLeadPills);
+      expect(find.descendant(of: pills, matching: find.text('GAP')), findsOneWidget);
+      expect(find.descendant(of: pills, matching: find.text(enhancedNoLeadValue)), findsNWidgets(3));
+      expect(tester.getRect(pills).height, closeTo(tester.getRect(find.byType(EnhancedSteeringPills)).height, 0.01));
+    });
+
+    testWidgets('lead readout dashes out while disengaged, even with a lead car', (tester) async {
+      _screen(tester, 1920, 1080);
+      await tester.pumpWidget(_app(createMockUIState(engaged: false), _enhanced()));
+      final pills = find.byType(EnhancedLeadPills);
+      expect(find.descendant(of: pills, matching: find.text(enhancedNoLeadValue)), findsNWidgets(3));
+      expect(find.descendant(of: pills, matching: find.text('1.7 s')), findsNothing);
+    });
+
+    testWidgets('lead readout is filled in while steering only', (tester) async {
+      _screen(tester, 1920, 1080);
+      final state = createMockUIState();
+      state.status = UIStatus.latOnly;
+      await tester.pumpWidget(_app(state, _enhanced()));
+      final pills = find.byType(EnhancedLeadPills);
+      expect(find.descendant(of: pills, matching: find.text('1.7 s')), findsOneWidget);
+      expect(find.descendant(of: pills, matching: find.text(enhancedNoLeadValue)), findsNothing);
     });
   });
 

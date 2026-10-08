@@ -88,6 +88,9 @@ class ModelRendererPainter extends CustomPainter {
 
   /// the distance tag is kept at or below this y, so it stays clear of the HUD above
   final double leadTagMinTop;
+
+  /// draw lead car markers at all (Enhanced turns them off while disengaged)
+  final bool showLeads;
   final int _version;
 
   ModelRendererPainter({
@@ -97,6 +100,7 @@ class ModelRendererPainter extends CustomPainter {
     this.pathEdgeLines = false,
     this.leadReticle = false,
     this.leadTagMinTop = 0,
+    this.showLeads = true,
   }) : _version = state.version;
 
   // working data — rebuilt each paint
@@ -260,6 +264,7 @@ class ModelRendererPainter extends CustomPainter {
 
   /// draw lead vehicle indicators
   void _drawLeadIndicators(Canvas canvas, List<double> pathX) {
+    if (!showLeads) return;
     if (leadReticle) {
       // the second lead only when it is a different car (stock: more than 3 m apart)
       final one = _activeLead(state.leadOne);
@@ -582,5 +587,6 @@ class ModelRendererPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(ModelRendererPainter oldDelegate) =>
-    oldDelegate._version != _version || !identical(oldDelegate.carSpaceTransform, carSpaceTransform);
+    oldDelegate._version != _version || !identical(oldDelegate.carSpaceTransform, carSpaceTransform) ||
+    oldDelegate.showLeads != showLeads;
 }

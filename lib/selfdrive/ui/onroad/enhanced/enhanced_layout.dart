@@ -147,6 +147,7 @@ class EnhancedLayout extends StatelessWidget {
                 pathEdgeLines: true,
                 leadReticle: true,
                 leadTagMinTop: hudBottom + 4 * unit,
+                showLeads: enhancedShowsLead(st.status),
               ),
             ),
 
@@ -542,6 +543,14 @@ class EnhancedSteeringPills extends StatelessWidget {
 
 // -- lead car readout --
 
+/// lead car box and numbers show whenever openpilot is doing something (steering
+/// only, cruise only, fully engaged, or overridden), not while disengaged
+bool enhancedShowsLead(UIStatus status) => status != UIStatus.disengaged;
+
+/// shown in each lead pill while there is no lead to report
+const enhancedNoLeadValue = '– –';
+const _noLeadColor = Color(0xFF8A8A8A);
+
 /// following time in seconds, or a dash when standing still
 String formatLeadGap(double dRel, double vEgo) => vEgo > 0.5 ? '${(dRel / vEgo).toStringAsFixed(1)} s' : '–';
 
@@ -551,8 +560,9 @@ String formatLeadRelSpeed(double vRel, double conv, String speedUnit) {
   return '${v > 0 ? '+' : ''}$v $speedUnit';
 }
 
-/// bottom right, only while there is a lead car: time gap, speed difference, and
-/// the lead's own speed. The distance is on the tag above the lead's box
+/// bottom right, always there: time gap, speed difference, and the lead's own
+/// speed, or grey dashes with no lead car or while disengaged. The distance is on
+/// the tag above the lead's box
 class EnhancedLeadPills extends StatelessWidget {
   final UIState uiState;
   final double unit;
@@ -562,15 +572,26 @@ class EnhancedLeadPills extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final st = uiState;
-    final lead = st.activeLead;
-    if (lead == null) return const SizedBox.shrink();
+    final lead = enhancedShowsLead(st.status) ? st.activeLead : null;
+    final gap = SizedBox(height: enhancedInfoPillGap * unit);
+    if (lead == null) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _infoPill(unit, 'GAP', enhancedNoLeadValue, _noLeadColor),
+          gap,
+          _infoPill(unit, 'REL', enhancedNoLeadValue, _noLeadColor),
+          gap,
+          _infoPill(unit, 'LEAD', enhancedNoLeadValue, _noLeadColor),
+        ],
+      );
+    }
 
     final dRel = (lead['dRel'] as num?)?.toDouble() ?? 0.0;
     final vRel = (lead['vRel'] as num?)?.toDouble() ?? 0.0;
     final speedUnit = st.isMetric ? 'km/h' : 'mph';
     final leadSpeed = max(0.0, (st.vEgo + vRel) * st.speedConv).round();
     final warn = leadWarnColor(leadWarnLevel(dRel, vRel));
-    final gap = SizedBox(height: enhancedInfoPillGap * unit);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
