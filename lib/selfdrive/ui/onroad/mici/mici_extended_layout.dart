@@ -150,6 +150,7 @@ class MiciExtendedLayout extends StatelessWidget {
                 state: st,
                 carSpaceTransform: frame.carToScreen,
                 contentRect: Rect.fromLTWH(0, 0, w, h),
+                pathEdgeLines: true,
               ),
             ),
 

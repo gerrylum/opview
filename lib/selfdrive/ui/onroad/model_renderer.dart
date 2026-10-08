@@ -23,6 +23,10 @@ const throttleColors = [
   Color.fromARGB(89, 114, 255, 92),
   Color.fromARGB(0, 114, 255, 92),
 ];
+// path edge lines (comma four style layout), before the distance fade
+const pathEdgeThrottleColor = Color.fromARGB(255, 60, 255, 150);
+const pathEdgeNoThrottleColor = Color.fromARGB(255, 255, 255, 255);
+
 const noThrottleColors = [
   Color.fromARGB(102, 242, 242, 242),
   Color.fromARGB(89, 242, 242, 242),
@@ -49,12 +53,16 @@ class ModelRendererPainter extends CustomPainter {
   final UIState state;
   final List<List<double>> carSpaceTransform;
   final Rect contentRect;
+
+  /// also draw a bright thin line along each side of the path while engaged
+  final bool pathEdgeLines;
   final int _version;
 
   ModelRendererPainter({
     required this.state,
     required this.carSpaceTransform,
     required this.contentRect,
+    this.pathEdgeLines = false,
   }) : _version = state.version;
 
   // working data — rebuilt each paint
@@ -108,6 +116,7 @@ class ModelRendererPainter extends CustomPainter {
     _drawLaneLines(canvas, laneLinePolys);
     _drawRoadEdges(canvas, roadEdgePolys);
     _drawPath(canvas, pathPoly);
+    if (pathEdgeLines && state.status != UIStatus.disengaged) _drawPathEdges(canvas, pathPoly);
     _drawLeadIndicators(canvas, pathX);
   }
 
@@ -146,6 +155,39 @@ class ModelRendererPainter extends CustomPainter {
         Color.lerp(noThrottleColors[i], throttleColors[i], blend)!,
     ];
     _drawGradientPolygon(canvas, pathPoly, colors, [0.0, 0.5, 1.0]);
+  }
+
+  /// bright thin line along each side of the path, fading with distance like the fill.
+  /// the polygon is the left side near to far, then the right side far to near
+  void _drawPathEdges(Canvas canvas, List<Offset> pathPoly) {
+    final half = pathPoly.length ~/ 2;
+    if (half < 2) return;
+
+    var minY = double.infinity, maxY = double.negativeInfinity;
+    for (final p in pathPoly) {
+      if (p.dy < minY) minY = p.dy;
+      if (p.dy > maxY) maxY = p.dy;
+    }
+    if (maxY - minY < 1) return;
+
+    // the fill's colour at full strength: green with throttle, white without
+    final base = Color.lerp(pathEdgeNoThrottleColor, pathEdgeThrottleColor, state.throttleBlend.clamp(0.0, 1.0))!;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = max(1.5, 4 * contentRect.height / 1080.0)
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..shader = ui.Gradient.linear(
+        Offset(0, maxY),
+        Offset(0, minY),
+        [base.withAlpha(242), base.withAlpha(191), base.withAlpha(0)],
+        [0.0, 0.5, 1.0],
+      );
+
+    final left = ui.Path()..addPolygon(pathPoly.sublist(0, half), false);
+    final right = ui.Path()..addPolygon(pathPoly.sublist(pathPoly.length - half), false);
+    canvas.drawPath(left, paint);
+    canvas.drawPath(right, paint);
   }
 
   /// experimental mode: HSL acceleration gradient

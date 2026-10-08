@@ -9,6 +9,7 @@ import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
 import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/mici/mici_extended_layout.dart';
+import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/impl/cereal_adapter.dart';
 import 'package:opview/services/app_settings.dart';
@@ -172,6 +173,35 @@ void main() {
       expect(miciBallColors(UIStatus.engaged, confidence: 0.4)!.first, const Color(0xFFFFC800));
       expect(miciBallColors(UIStatus.engaged, confidence: 0.1)!.first, const Color(0xFFFF0015));
       expect(miciBallColors(UIStatus.latOnly, confidence: 0.1)!.first, const Color(0xFF4D9DFF));
+    });
+  });
+
+  group('path edge lines', () {
+    ModelRendererPainter painterOf(WidgetTester tester) {
+      final paints = tester.widgetList<CustomPaint>(find.byType(CustomPaint));
+      return paints.map((p) => p.painter).whereType<ModelRendererPainter>().single;
+    }
+
+    testWidgets('are on in the comma four style layout and off in Classic', (tester) async {
+      _screen(tester, 1920, 1080);
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: createMockUIState(), settings: _mici())));
+      expect(painterOf(tester).pathEdgeLines, true);
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: createMockUIState(), settings: AppSettings())));
+      expect(painterOf(tester).pathEdgeLines, false);
+    });
+
+    testWidgets('paint without errors engaged, disengaged and in experimental mode', (tester) async {
+      _screen(tester, 1920, 1080);
+      for (final state in [
+        createMockUIState(),
+        createMockUIState(engaged: false),
+        createMockUIState(experimentalMode: true),
+      ]) {
+        await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: state, settings: _mici())));
+        expect(tester.takeException(), isNull);
+      }
     });
   });
 
