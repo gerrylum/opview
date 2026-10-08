@@ -27,6 +27,7 @@ import 'package:opview/services/app_settings.dart';
 const detailedPanelWidth = 112.0;
 const detailedPanelTop = 82.0;        // below the driver icon
 const detailedCornerWidth = 82.0;     // clock and device health, top right
+const detailedSidePillWidth = 98.0;   // set speed and speed limit (Enhanced's are 116)
 const _rowHeight = 9.0;
 const _traceHeight = 20.0;
 
@@ -370,7 +371,7 @@ class DetailedTopRow extends StatelessWidget {
   Widget _box({Key? key, Color color = const Color(0xB3141414), required Widget child}) {
     return Container(
       key: key,
-      width: enhancedSidePillWidth * unit,
+      width: detailedSidePillWidth * unit,
       height: enhancedSidePillHeight * unit,
       padding: EdgeInsets.symmetric(horizontal: 10 * unit),
       alignment: Alignment.center,

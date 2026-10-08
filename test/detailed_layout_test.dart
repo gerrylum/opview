@@ -168,6 +168,10 @@ void main() {
       await tester.pumpWidget(_app(state, _detailed()));
       expect(find.descendant(of: pill, matching: find.text('45')), findsOneWidget);
       expect(find.byKey(const ValueKey('detailedNextLimit')), findsOneWidget);
+      // set speed and speed limit are narrower than Enhanced's, and the same width
+      final unit = enhancedUnit(const Size(1920, 1080));
+      expect(tester.getSize(pill).width, closeTo(detailedSidePillWidth * unit, 0.01));
+      expect(tester.getSize(find.byKey(const ValueKey('detailedSetSpeed'))).width, closeTo(detailedSidePillWidth * unit, 0.01));
     });
 
     testWidgets('lead panel: filled in with a lead, dashes while disengaged', (tester) async {
