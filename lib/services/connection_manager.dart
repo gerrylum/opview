@@ -57,6 +57,9 @@ class ConnectionManager {
         _adapter = adapter ?? CerealAdapter();
 
   String? _host;
+
+  /// address of the comma in use or being tried, if any
+  String? get host => _host;
   StreamSubscription? _deviceSub;
   StreamSubscription? _dataSub;
   StreamSubscription? _stateSub;

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
 import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
+import 'package:opview/selfdrive/ui/settings/settings_dialog.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -65,6 +66,105 @@ void main() {
       await s.setClockMode(ClockMode.h12);
       await s.setClockMode(ClockMode.h12);
       expect(calls, 1);
+    });
+  });
+
+  group('ClockText', () {
+    testWidgets('can draw AM/PM separately, for a smaller style', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Center(
+          child: ClockText(
+            mode: ClockMode.h12,
+            style: const TextStyle(fontSize: 24),
+            suffixStyle: const TextStyle(fontSize: 11),
+            suffixGap: 5,
+            now: () => DateTime(2026, 10, 7, 14, 5),
+          ),
+        ),
+      ));
+      expect(find.text('2:05'), findsOneWidget);
+      expect(find.text('PM'), findsOneWidget);
+      expect(tester.getRect(find.text('PM')).left, greaterThan(tester.getRect(find.text('2:05')).right));
+    });
+
+    testWidgets('24 hour time has no suffix to split off', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Center(
+          child: ClockText(
+            mode: ClockMode.h24,
+            style: const TextStyle(fontSize: 24),
+            suffixStyle: const TextStyle(fontSize: 11),
+            now: () => DateTime(2026, 10, 7, 14, 5),
+          ),
+        ),
+      ));
+      expect(find.text('14:05'), findsOneWidget);
+    });
+  });
+
+  group('settings menu', () {
+    test('short names, in the order offered', () {
+      expect(clockModeChoices.map(clockModeLabel).toList(), ['Off', '12 hour', '24 hour', 'Auto']);
+      expect(OnroadLayout.values.map(onroadLayoutLabel).toList(), ['Classic', 'Enhanced']);
+    });
+
+    Future<void> open(WidgetTester tester, {String? host, bool manual = false, VoidCallback? onChange}) async {
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      SharedPreferences.setMockInitialValues({});
+      final settings = AppSettings();
+      await tester.pumpWidget(MaterialApp(
+        home: Material(
+          child: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showSettingsDialog(context, settings,
+                  host: host, hostIsManual: manual, onChangeHost: onChange, build: 'abc1234'),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('shows the comma address, how it was found, and the build', (tester) async {
+      await open(tester, host: '192.168.1.50');
+      expect(find.text('192.168.1.50'), findsOneWidget);
+      expect(find.text('found automatically'), findsOneWidget);
+      expect(find.text('opview \u00B7 abc1234'), findsOneWidget);
+      expect(find.text('Change'), findsNothing);  // no way to change it was given
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('says when the address was typed in, and when there is none yet', (tester) async {
+      await open(tester, host: '10.0.0.5', manual: true);
+      expect(find.text('entered by hand'), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+      expect(find.text('Settings'), findsNothing);
+
+      await open(tester);
+      expect(find.text('Not found yet'), findsOneWidget);
+      expect(find.text('searching the network'), findsOneWidget);
+    });
+
+    testWidgets('Change closes the menu and asks for the address', (tester) async {
+      var asked = 0;
+      await open(tester, host: '192.168.1.50', onChange: () => asked++);
+      await tester.tap(find.text('Change'));
+      await tester.pumpAndSettle();
+      expect(asked, 1);
+      expect(find.text('Settings'), findsNothing);
+    });
+
+    testWidgets('fits a screen as short as the comma four shape', (tester) async {
+      await open(tester, host: '192.168.1.50', onChange: () {});
+      tester.view.physicalSize = const Size(1072, 480);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
     });
   });
 
@@ -140,13 +240,13 @@ void main() {
 
       await tester.longPress(find.byType(AugmentedRoadView));
       await tester.pumpAndSettle();
-      expect(find.text('opview settings'), findsOneWidget);
+      expect(find.text('Settings'), findsOneWidget);
 
-      await tester.tap(find.text('On (24 hour)'));
+      await tester.tap(find.text('24 hour'));
       await tester.pumpAndSettle();
       expect(settings.clockMode, ClockMode.h24);
 
-      await tester.tap(find.text('Close'));
+      await tester.tap(find.byIcon(Icons.close));
       await tester.pumpAndSettle();
       expect(find.byType(ClockRenderer), findsOneWidget);
     });

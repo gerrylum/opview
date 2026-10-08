@@ -23,7 +23,33 @@ const throttleColors = [
   Color.fromARGB(89, 114, 255, 92),
   Color.fromARGB(0, 114, 255, 92),
 ];
-// path edge lines (comma four style layout), before the distance fade
+// lead reticle (Enhanced layout): the size of the box in metres
+const leadBoxWidth = 1.8;
+const leadBoxHeight = 1.5;
+const leadBoxDepth = 1.8;
+
+/// how urgent a lead car is, 0..1: closer and closing faster is higher.
+/// the same rule the stock chevron uses for how solid it is drawn
+double leadWarnLevel(double dRel, double vRel) {
+  const speedBuff = 10.0, leadBuff = 40.0;
+  if (dRel >= leadBuff) return 0.0;
+  var level = 1.0 - dRel / leadBuff;
+  if (vRel < 0) level += -vRel / speedBuff;
+  return level.clamp(0.0, 1.0).toDouble();
+}
+
+/// white when relaxed, through orange, to red when urgent
+Color leadWarnColor(double level) {
+  const white = Color(0xFFFFFFFF), orange = Color(0xFFFF9A3C), red = Color(0xFFFF3B3B);
+  if (level < 0.5) return Color.lerp(white, orange, level * 2)!;
+  return Color.lerp(orange, red, (level - 0.5) * 2)!;
+}
+
+/// "32 m" or "105 ft"
+String formatLeadDistance(double metres, bool isMetric) =>
+    isMetric ? '${metres.round()} m' : '${(metres * 3.28084).round()} ft';
+
+// path edge lines (Enhanced layout), before the distance fade
 const pathEdgeThrottleColor = Color.fromARGB(255, 60, 255, 150);
 const pathEdgeNoThrottleColor = Color.fromARGB(255, 255, 255, 255);
 
@@ -56,6 +82,12 @@ class ModelRendererPainter extends CustomPainter {
 
   /// also draw a bright thin line along each side of the path while engaged
   final bool pathEdgeLines;
+
+  /// mark lead cars with a car-sized box and a distance tag, not the chevron
+  final bool leadReticle;
+
+  /// the distance tag is kept at or below this y, so it stays clear of the HUD above
+  final double leadTagMinTop;
   final int _version;
 
   ModelRendererPainter({
@@ -63,6 +95,8 @@ class ModelRendererPainter extends CustomPainter {
     required this.carSpaceTransform,
     required this.contentRect,
     this.pathEdgeLines = false,
+    this.leadReticle = false,
+    this.leadTagMinTop = 0,
   }) : _version = state.version;
 
   // working data — rebuilt each paint
@@ -226,6 +260,21 @@ class ModelRendererPainter extends CustomPainter {
 
   /// draw lead vehicle indicators
   void _drawLeadIndicators(Canvas canvas, List<double> pathX) {
+    if (leadReticle) {
+      // the second lead only when it is a different car (stock: more than 3 m apart)
+      final one = _activeLead(state.leadOne);
+      final two = _activeLead(state.leadTwo);
+      if (one != null) _drawLeadReticle(canvas, one, pathX, tag: true);
+      if (two != null) {
+        if (one == null) {
+          _drawLeadReticle(canvas, two, pathX, tag: true);
+        } else if ((_leadNum(two, 'dRel') - _leadNum(one, 'dRel')).abs() > 3.0) {
+          _drawLeadReticle(canvas, two, pathX, tag: false);
+        }
+      }
+      return;
+    }
+
     final leads = [state.leadOne, state.leadTwo];
     for (final lead in leads) {
       if (lead == null || lead['status'] != true) continue;
@@ -242,6 +291,87 @@ class ModelRendererPainter extends CustomPainter {
       final lv = _buildLeadVehicle(dRel, vRel, point);
       _drawLeadTriangles(canvas, lv);
     }
+  }
+
+  Map<String, dynamic>? _activeLead(Map<String, dynamic>? lead) =>
+      (lead != null && lead['status'] == true) ? lead : null;
+
+  double _leadNum(Map<String, dynamic> lead, String key) => (lead[key] as num?)?.toDouble() ?? 0.0;
+
+  /// a box the size of a car, standing on the road at the lead's distance and drawn
+  /// through the camera projection, so it grows and shrinks as the real car does.
+  /// near face: bold corner brackets; far face and the edges joining them: faint
+  void _drawLeadReticle(Canvas canvas, Map<String, dynamic> lead, List<double> pathX, {required bool tag}) {
+    final dRel = _leadNum(lead, 'dRel');
+    final vRel = _leadNum(lead, 'vRel');
+    final yRel = _leadNum(lead, 'yRel');
+    final idx = _getPathLengthIdx(pathX, dRel);
+    final zGround = ((idx < state.pathZ.length) ? state.pathZ[idx] : 0.0) + _pathOffsetZ;
+
+    // corners in order round each face: top left, top right, bottom right, bottom left
+    // (z is down, so the top of the box is above the road by subtracting its height)
+    final near = <Offset>[], far = <Offset>[];
+    for (final corner in const [[-1.0, 1.0], [1.0, 1.0], [1.0, 0.0], [-1.0, 0.0]]) {
+      final y = -yRel + corner[0] * leadBoxWidth / 2;
+      final z = zGround - corner[1] * leadBoxHeight;
+      final n = _mapToScreen(dRel, y, z);
+      final f = _mapToScreen(dRel + leadBoxDepth, y, z);
+      if (n == null || f == null) return;
+      near.add(n);
+      far.add(f);
+    }
+
+    final color = leadWarnColor(leadWarnLevel(dRel, vRel));
+    final s = contentRect.height / 1080.0;
+    final nearWidth = (near[1] - near[0]).distance;
+    final bold = (nearWidth * 0.045).clamp(3.5 * s, 9.0 * s).toDouble();
+
+    final faint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = bold * 0.5
+      ..color = color.withAlpha(140);
+    canvas.drawPath(ui.Path()..addPolygon(far, true), faint);
+    for (int i = 0; i < 4; i++) {
+      canvas.drawLine(near[i], far[i], faint);
+    }
+
+    final bracket = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = bold
+      ..strokeCap = StrokeCap.round
+      ..color = color;
+    for (int i = 0; i < 4; i++) {
+      final p = near[i];
+      for (final q in [near[(i + 3) % 4], near[(i + 1) % 4]]) {
+        canvas.drawLine(p, Offset.lerp(p, q, 0.28)!, bracket);
+      }
+    }
+
+    if (!tag) return;
+
+    // distance tag above the box; when the car is close it stops at leadTagMinTop
+    // and so tucks into the top of the box
+    final fontSize = 0.034 * contentRect.height;
+    final label = TextPainter(
+      text: TextSpan(
+        text: formatLeadDistance(dRel, state.isMetric),
+        style: TextStyle(color: color, fontSize: fontSize, fontWeight: FontWeight.bold, height: 1.0),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final tagW = label.width + fontSize * 1.1;
+    final tagH = fontSize * 1.4;
+    final centerX = (near[0].dx + near[1].dx) / 2;
+    final boxTop = min(near[0].dy, near[1].dy);
+    final tagTop = max(boxTop - tagH - 0.014 * contentRect.height, leadTagMinTop);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(centerX - tagW / 2, tagTop, tagW, tagH),
+        Radius.circular(tagH * 0.3),
+      ),
+      Paint()..color = const Color(0xBF141414),
+    );
+    label.paint(canvas, Offset(centerX - label.width / 2, tagTop + (tagH - label.height) / 2));
   }
 
   // -- projection --

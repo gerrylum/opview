@@ -66,6 +66,7 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
           videoRenderer: _connectionManager.videoRenderer,
           loadManualHost: _connectionManager.loadManualHost,
           onSetManualHost: _connectionManager.setManualHost,
+          currentHost: () => _connectionManager.host,
           settings: _settings,
         ),
       ),

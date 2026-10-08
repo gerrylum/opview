@@ -16,7 +16,7 @@ import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/alert_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
-import 'package:opview/selfdrive/ui/onroad/mici/mici_extended_layout.dart';
+import 'package:opview/selfdrive/ui/onroad/enhanced/enhanced_layout.dart';
 import 'package:opview/selfdrive/ui/settings/settings_dialog.dart';
 import 'package:opview/services/app_settings.dart';
 
@@ -46,6 +46,9 @@ class AugmentedRoadView extends StatefulWidget {
   // viewer-side settings (clock, ...); null = everything at its default
   final AppSettings? settings;
 
+  // address of the comma in use, for the settings menu
+  final String? Function()? currentHost;
+
   const AugmentedRoadView({
     super.key,
     required this.uiState,
@@ -53,6 +56,7 @@ class AugmentedRoadView extends StatefulWidget {
     this.loadManualHost,
     this.onSetManualHost,
     this.settings,
+    this.currentHost,
   });
 
   @override
@@ -99,12 +103,12 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
           // long press anywhere opens the settings
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onLongPress: settings == null ? null : () => showSettingsDialog(context, settings),
+            onLongPress: settings == null ? null : () => _openSettings(context, settings),
             child: Stack(
             fit: StackFit.expand,
             children: [
-              if (layout == OnroadLayout.miciExtended)
-                MiciExtendedLayout(
+              if (layout == OnroadLayout.enhanced)
+                EnhancedLayout(
                   uiState: widget.uiState,
                   clockMode: clockMode,
                   frameFor: _fullScreenFrame,
@@ -197,7 +201,7 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
                       ],
                       if (settings != null)
                         TextButton(
-                          onPressed: () => showSettingsDialog(context, settings),
+                          onPressed: () => _openSettings(context, settings),
                           child: Text(
                             'Settings',
                             style: TextStyle(color: const Color(0x99FFFFFF), fontSize: 20 * scale),
@@ -211,6 +215,20 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
           ),
         );
       }),
+    );
+  }
+
+  /// the settings menu, with the comma's address and a way to change it
+  Future<void> _openSettings(BuildContext context, AppSettings settings) async {
+    final manualHost = await widget.loadManualHost?.call();
+    if (!context.mounted) return;
+    await showSettingsDialog(
+      context,
+      settings,
+      host: widget.currentHost?.call(),
+      hostIsManual: manualHost != null,
+      onChangeHost: widget.onSetManualHost == null ? null : () => _showManualHostDialog(context),
+      build: opviewBuild,
     );
   }
 

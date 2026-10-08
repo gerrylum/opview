@@ -83,12 +83,6 @@ class UIState extends ChangeNotifier {
   double dmAwarenessPercent = 100.0;
   double dmRotationDeg = 90.0;       // which way the head is turned, smoothed; 90 = straight ahead
 
-  // modelV2.meta.disengagePredictions: largest value of each list
-  bool confidenceSeen = false;
-  double brakeDisengageProb = 0.0;
-  double steerOverrideProb = 0.0;
-  double confidenceFiltered = -0.5;  // smoothed confidence; below 0 while disengaged
-
   // modelV2 — raw lists from cereal
   List<double> pathX = [];
   List<double> pathY = [];
@@ -271,16 +265,6 @@ class UIState extends ChangeNotifier {
     }
     _fillDoublesFixed(roadEdgeStds, data['roadEdgeStds'], 2);
     _fillDoubles(accelerationX, data['acceleration']?['x']);
-
-    // confidence ball (mici confidence_ball.py); sent by webrtcd only on newer opview branches
-    final predictions = data['meta']?['disengagePredictions'];
-    if (predictions is Map) {
-      confidenceSeen = true;
-      brakeDisengageProb = _largest(predictions['brakeDisengageProbs']);
-      steerOverrideProb = _largest(predictions['steerOverrideProbs']);
-    }
-    // first-order filter, tau 0.5 s at ~20 Hz
-    confidenceFiltered += 0.09 * (confidenceTarget - confidenceFiltered);
 
     // smooth throttle blend: first-order filter (tau=0.25s at ~20Hz → k≈0.167)
     const k = 0.167; // dt / (tau + dt) = 0.05 / (0.25 + 0.05)
@@ -477,6 +461,12 @@ class UIState extends ChangeNotifier {
 
   // -- derived values --
 
+  /// the radar's primary lead car, or null when there is none
+  Map<String, dynamic>? get activeLead {
+    final lead = leadOne;
+    return (lead != null && lead['status'] == true) ? lead : null;
+  }
+
   /// how openpilot is steering right now, or null when it is not steering.
   /// an angle-capable Rivian switches between the two while driving; other cars
   /// report the controller they use
@@ -488,23 +478,7 @@ class UIState extends ChangeNotifier {
     return null;
   }
 
-  /// how confident the model is that no takeover is coming, 0..1; -0.5 while
-  /// disengaged so the ball slides off the bottom (confidence_ball.py)
-  double get confidenceTarget {
-    switch (status) {
-      case UIStatus.disengaged:
-        return -0.5;
-      case UIStatus.latOnly:
-        return 1 - steerOverrideProb;
-      case UIStatus.longOnly:
-        return 1 - brakeDisengageProb;
-      case UIStatus.engaged:
-      case UIStatus.override_:
-        return (1 - brakeDisengageProb) * (1 - steerOverrideProb);
-    }
-  }
-
-  /// steering effort for the comma four style torque bar, -1..1 (mici torque_bar.py).
+  /// steering effort for the Enhanced layout's torque bar, -1..1 (mici torque_bar.py).
   /// angle and curvature control have no torque, so the device estimates it from
   /// lateral acceleration; it also removes road roll, which opview is not sent
   double get torqueBarValue {
@@ -559,17 +533,6 @@ class UIState extends ChangeNotifier {
   bool get isCruiseAvailable => _rawSetSpeed != -1;
 
   // -- helpers --
-
-  /// largest number in [source]; 1 if it is missing or empty, as on the device
-  double _largest(dynamic source) {
-    if (source is! List || source.isEmpty) return 1.0;
-    var best = 0.0;
-    for (final e in source) {
-      final v = (e as num?)?.toDouble() ?? 0.0;
-      if (v > best) best = v;
-    }
-    return best;
-  }
 
   /// Clear [target] and refill from [source] — reuses the existing list.
   void _fillDoubles(List<double> target, dynamic source) {

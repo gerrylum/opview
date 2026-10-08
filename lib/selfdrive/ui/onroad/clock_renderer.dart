@@ -52,10 +52,21 @@ class ClockText extends StatefulWidget {
   final ClockMode mode;
   final TextStyle style;
 
+  /// when given, AM/PM is drawn separately in this style, after a gap of [suffixGap]
+  final TextStyle? suffixStyle;
+  final double suffixGap;
+
   /// time source, replaceable in tests
   final DateTime Function()? now;
 
-  const ClockText({super.key, required this.mode, required this.style, this.now});
+  const ClockText({
+    super.key,
+    required this.mode,
+    required this.style,
+    this.suffixStyle,
+    this.suffixGap = 0,
+    this.now,
+  });
 
   @override
   State<ClockText> createState() => _ClockTextState();
@@ -97,6 +108,18 @@ class _ClockTextState extends State<ClockText> {
   @override
   Widget build(BuildContext context) {
     _shown = _text();
-    return Text(_shown, style: widget.style);
+    final suffixStyle = widget.suffixStyle;
+    final space = _shown.indexOf(' ');
+    if (suffixStyle == null || space < 0) return Text(_shown, style: widget.style);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Text(_shown.substring(0, space), style: widget.style),
+        SizedBox(width: widget.suffixGap),
+        Text(_shown.substring(space + 1), style: suffixStyle),
+      ],
+    );
   }
 }
