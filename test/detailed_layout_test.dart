@@ -178,6 +178,7 @@ void main() {
       await tester.pumpWidget(_app(state, _detailed()));
       final pill = find.byKey(const ValueKey('detailedSpeedLimit'));
       expect(find.descendant(of: pill, matching: find.text('– –')), findsOneWidget);
+      expect(find.descendant(of: pill, matching: find.byKey(const ValueKey('detailedSpeedLimitOutline'))), findsOneWidget);
       expect(find.byKey(const ValueKey('detailedNextLimit')), findsNothing);
 
       state

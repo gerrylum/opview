@@ -444,8 +444,7 @@ class DetailedTopRow extends StatelessWidget {
     final limit = detailedSpeedLimit(st);
     final hasNext = limit != null && st.speedLimitAheadValid && st.speedLimitAhead > 0 && st.speedLimitAheadDistance > 0;
     final labelStyle = TextStyle(color: _limitLabelColor, fontSize: 10 * unit, fontWeight: FontWeight.w600, height: 1.0);
-    return _box(
-      key: const ValueKey('detailedSpeedLimit'),
+    final pill = _box(
       color: _limitPillColor,
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -480,6 +479,27 @@ class DetailedTopRow extends StatelessWidget {
           ],
         ],
       ),
+    );
+    // a thin dark line just inside the edge, like the border of a speed limit sign
+    return Stack(
+      key: const ValueKey('detailedSpeedLimit'),
+      children: [
+        pill,
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Padding(
+              padding: EdgeInsets.all(2.5 * unit),
+              child: DecoratedBox(
+                key: const ValueKey('detailedSpeedLimitOutline'),
+                decoration: BoxDecoration(
+                  border: Border.all(color: _limitTextColor, width: 1.1 * unit),
+                  borderRadius: BorderRadius.circular(9.5 * unit),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
