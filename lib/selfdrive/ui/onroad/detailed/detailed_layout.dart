@@ -505,8 +505,9 @@ class _Panel extends StatelessWidget {
           SizedBox(
             height: 8 * unit,
             child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
+                _shrink(alignment: Alignment.centerLeft, Text(
                   title,
                   style: TextStyle(
                     color: const Color(0xFFCFCFCF),
@@ -515,9 +516,11 @@ class _Panel extends StatelessWidget {
                     letterSpacing: 0.6 * unit,
                     height: 1.0,
                   ),
-                ),
-                const Spacer(),
-                if (badge != null) badge!,
+                )),
+                if (badge != null) ...[
+                  SizedBox(width: 3 * unit),
+                  _shrink(alignment: Alignment.centerRight, badge!),
+                ],
               ],
             ),
           ),
@@ -526,10 +529,14 @@ class _Panel extends StatelessWidget {
             SizedBox(
               height: _rowHeight * unit,
               child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(label, style: TextStyle(color: _labelColor, fontSize: 5.6 * unit, fontWeight: FontWeight.w600, height: 1.0)),
+                  _shrink(
+                    alignment: Alignment.centerLeft,
+                    Text(label, style: TextStyle(color: _labelColor, fontSize: 5.6 * unit, fontWeight: FontWeight.w600, height: 1.0)),
+                  ),
                   SizedBox(width: 3 * unit),
-                  Expanded(
+                  Flexible(
                     child: FittedBox(
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerRight,
@@ -554,6 +561,10 @@ class _Panel extends StatelessWidget {
     );
   }
 }
+
+/// [child] at its natural size when it fits in its share of a row, scaled down when not
+Widget _shrink(Widget child, {required Alignment alignment}) =>
+    Flexible(child: FittedBox(fit: BoxFit.scaleDown, alignment: alignment, child: child));
 
 /// small outlined tag for a panel title
 Widget detailedBadge(double unit, String text, Color color, {Key? key}) {
@@ -596,11 +607,12 @@ Widget _trace(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(children: [
-          Text(label, style: TextStyle(color: _labelColor, fontSize: 4.8 * unit, height: 1.0)),
-          const Spacer(),
-          key(wantName, Colors.white),
-          key(gotName, gotColor),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          _shrink(alignment: Alignment.centerLeft, Text(label, style: TextStyle(color: _labelColor, fontSize: 4.8 * unit, height: 1.0))),
+          _shrink(
+            alignment: Alignment.centerRight,
+            Row(mainAxisSize: MainAxisSize.min, children: [key(wantName, Colors.white), key(gotName, gotColor)]),
+          ),
         ]),
         SizedBox(height: 2 * unit),
         SizedBox(
@@ -722,7 +734,7 @@ class DetailedSteeringPanel extends StatelessWidget {
         ('Rate', '${st.steeringRateDeg.toStringAsFixed(1)}°/s', Colors.white),
         ('Torque cmd', on ? '${(st.torqueOutput * 100).round()}%' : detailedNoValue, Colors.white),
         ('Driver torque', st.steeringTorque.toStringAsFixed(1), Colors.white),
-        ('Lat accel want / got', on ? formatAccelPair(st.latAccelWant, st.latAccelGot) : detailedNoValue, Colors.white),
+        ('Lat accel', on ? formatAccelPair(st.latAccelWant, st.latAccelGot) : detailedNoValue, Colors.white),
       ],
       footer: _trace(
         unit,
