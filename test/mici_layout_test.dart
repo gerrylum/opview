@@ -175,6 +175,66 @@ void main() {
     });
   });
 
+  group('steering readout', () {
+    test('angles have one decimal and no negative zero', () {
+      expect(formatSteeringAngle(12.34), '12.3\u00B0');
+      expect(formatSteeringAngle(-3.26), '-3.3\u00B0');
+      expect(formatSteeringAngle(-0.04), '0.0\u00B0');
+      expect(formatSteeringAngle(0), '0.0\u00B0');
+    });
+
+    test('target angle is read from carControl', () {
+      final s = UIState();
+      s.applyCarControl({'latActive': true, 'actuators': {'steeringAngleDeg': 7.5}});
+      expect(s.targetSteeringAngleDeg, 7.5);
+      s.applyCarControl({'latActive': false});
+      expect(s.targetSteeringAngleDeg, 0.0);
+    });
+
+    test('mode: nothing when not steering, else the Rivian mode or the controller in use', () {
+      final s = UIState();
+      s.lateralControlKind = 'torqueState';
+      expect(s.steeringMode, isNull);
+      s.latActive = true;
+      expect(s.steeringMode, LateralMode.torque);
+      s.lateralControlKind = 'angleState';
+      expect(s.steeringMode, LateralMode.angle);
+      // an angle-capable Rivian's own inference wins
+      s.lateralMode = LateralMode.torque;
+      expect(s.steeringMode, LateralMode.torque);
+    });
+
+    testWidgets('shows mode, target and actual angle', (tester) async {
+      _screen(tester, 1920, 1080);
+      final state = createMockUIState();
+      state.applyCarControl({'latActive': true, 'actuators': {'steeringAngleDeg': 12.34}});
+      state.steeringAngleDeg = -3.26;
+      state.lateralControlKind = 'angleState';
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: state, settings: _mici())));
+      final pills = find.byType(MiciSteeringPills);
+      expect(pills, findsOneWidget);
+      expect(find.descendant(of: pills, matching: find.text('ANGLE')), findsOneWidget);
+      expect(find.descendant(of: pills, matching: find.text('12.3\u00B0')), findsOneWidget);
+      expect(find.descendant(of: pills, matching: find.text('-3.3\u00B0')), findsOneWidget);
+      // bottom left of the screen
+      final rect = tester.getRect(pills);
+      expect(rect.left, lessThan(1920 * 0.1));
+      expect(rect.bottom, greaterThan(1080 * 0.85));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('when openpilot is not steering: OFF and no target', (tester) async {
+      _screen(tester, 1920, 1080);
+      final state = createMockUIState();
+      state.steeringAngleDeg = 1.0;
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: state, settings: _mici())));
+      final pills = find.byType(MiciSteeringPills);
+      expect(find.descendant(of: pills, matching: find.text('OFF')), findsOneWidget);
+      expect(find.descendant(of: pills, matching: find.text('\u2013')), findsOneWidget);
+      expect(find.descendant(of: pills, matching: find.text('1.0\u00B0')), findsOneWidget);
+    });
+  });
+
   test('colours cover every engagement state', () {
     for (final status in UIStatus.values) {
       expect(miciBorderColor(status), isNotNull);

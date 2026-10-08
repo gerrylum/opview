@@ -5,7 +5,8 @@
 // rounded border in the engagement colour, with
 //   - driver monitoring icon, top left
 //   - speed in a dark pill, top centre
-//   - steering wheel icon, bottom left, turning with the steering angle
+//   - steering readout, bottom left: angle or torque mode, target and actual angle
+//     (the device shows a steering wheel icon here)
 //   - torque bar, bottom centre
 //   - confidence ball on the right edge: high and green when the model is
 //     confident, sinking and turning orange then red as a takeover gets likelier
@@ -38,8 +39,8 @@ const miciScreenWidth = 536.0;
 const miciScreenHeight = 240.0;
 const miciCornerRadius = 12.0;   // the device's is 24; halved for a large screen
 const miciBorderWidth = 4.0;
-const miciBallRadius = 22.0;
-const miciWheelSize = 50.0;
+const miciBallRadius = 14.0;     // the device's is 24
+const miciBallPadding = 4.0;     // dark disc showing around the ball
 const miciDriverIconSize = 54.0;
 const miciSpeedPillHeight = 52.0;
 const miciMargin = 16.0;         // gap between the border and the corner elements
@@ -133,7 +134,7 @@ class MiciExtendedLayout extends StatelessWidget {
       // without confidence values from the device the ball stays at the bottom
       final confidence = st.confidenceSeen ? st.confidenceFiltered.clamp(0.0, 1.0).toDouble() : 0.0;
       final ball = miciBallColors(st.status, confidence: st.confidenceSeen ? confidence : 1.0);
-      final ballSize = 2 * (miciBallRadius + 5) * unit;
+      final ballSize = 2 * (miciBallRadius + miciBallPadding) * unit;
       final ballTop = edge + (1 - confidence) * (h - 2 * edge - ballSize);
       final active = st.status != UIStatus.disengaged;
 
@@ -215,20 +216,12 @@ class MiciExtendedLayout extends StatelessWidget {
                 ),
               ),
 
-            // steering wheel, bottom left
-            if (active)
-              Positioned(
-                left: edge,
-                bottom: edge,
-                width: miciWheelSize * unit,
-                height: miciWheelSize * unit,
-                child: Transform.rotate(
-                  angle: -st.steeringAngleDeg * pi / 180,
-                  child: CustomPaint(
-                    painter: MiciWheelPainter(color: wheelTint(st.lateralMode) ?? Colors.white),
-                  ),
-                ),
-              ),
+            // steering readout, bottom left
+            Positioned(
+              left: edge,
+              bottom: edge,
+              child: MiciSteeringPills(uiState: st, unit: unit),
+            ),
 
             // confidence ball on a dark disc, travelling up and down the right edge
             if (ball != null)
@@ -241,7 +234,7 @@ class MiciExtendedLayout extends StatelessWidget {
                 child: DecoratedBox(
                   decoration: const BoxDecoration(shape: BoxShape.circle, color: _discColor),
                   child: Padding(
-                    padding: EdgeInsets.all(5 * unit),
+                    padding: EdgeInsets.all(miciBallPadding * unit),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
@@ -273,13 +266,19 @@ class MiciExtendedLayout extends StatelessWidget {
 }
 
 /// dark rounded box, as behind the speed; as wide as its content
-Widget _pill(double unit, {required double height, required Widget child}) {
+Widget _pill(
+  double unit, {
+  required double height,
+  required Widget child,
+  double padding = 14,
+  double radius = 12,
+}) {
   return Container(
     height: height * unit,
-    padding: EdgeInsets.symmetric(horizontal: 14 * unit),
+    padding: EdgeInsets.symmetric(horizontal: padding * unit),
     decoration: BoxDecoration(
       color: _pillColor,
-      borderRadius: BorderRadius.circular(12 * unit),
+      borderRadius: BorderRadius.circular(radius * unit),
     ),
     child: Center(widthFactor: 1, child: child),
   );
@@ -423,37 +422,83 @@ class MiciTopRow extends StatelessWidget {
   }
 }
 
-// -- steering wheel --
+// -- steering readout --
 
-/// solid wheel as on the comma four: a disc with a hub and three spokes
-/// (left, right, down). Drawn here because the device's icon file is not in the app
-class MiciWheelPainter extends CustomPainter {
-  final Color color;
+/// "12.3°", never "-0.0°"
+String formatSteeringAngle(double deg) {
+  final text = deg.toStringAsFixed(1);
+  return '${text == '-0.0' ? '0.0' : text}\u00B0';
+}
 
-  const MiciWheelPainter({required this.color});
+/// three small pills, bottom left: steering mode, the angle openpilot is asking
+/// for, and the angle the wheel is at
+class MiciSteeringPills extends StatelessWidget {
+  final UIState uiState;
+  final double unit;
+
+  const MiciSteeringPills({super.key, required this.uiState, required this.unit});
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final c = size.center(Offset.zero);
-    final r = size.shortestSide / 2;
-    final fill = Paint()..color = color.withAlpha(235);
-    final dark = Paint()..color = const Color(0xD9101010);
-
-    canvas.drawCircle(c, r, fill);
-    canvas.drawCircle(c, r * 0.74, dark);
-
-    final spoke = Paint()
-      ..color = color.withAlpha(235)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = r * 0.26;
-    canvas.drawLine(c, c + Offset(-r * 0.8, 0), spoke);
-    canvas.drawLine(c, c + Offset(r * 0.8, 0), spoke);
-    canvas.drawLine(c, c + Offset(0, r * 0.8), spoke);
-    canvas.drawCircle(c, r * 0.3, fill);
+  Widget build(BuildContext context) {
+    final st = uiState;
+    final mode = st.steeringMode;
+    final String modeText;
+    final Color modeColor;
+    switch (mode) {
+      case LateralMode.angle:
+        modeText = 'ANGLE';
+        modeColor = angleColor;
+      case LateralMode.torque:
+        modeText = 'TORQUE';
+        modeColor = torqueColor;
+      case null:
+        modeText = 'OFF';
+        modeColor = HudColors.grey;
+    }
+    final gap = SizedBox(height: 4 * unit);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _row('STEER', modeText, modeColor),
+        gap,
+        // only meaningful while openpilot is steering
+        _row('TARGET', st.latActive ? formatSteeringAngle(st.targetSteeringAngleDeg) : '\u2013', HudColors.white),
+        gap,
+        _row('ACTUAL', formatSteeringAngle(st.steeringAngleDeg), HudColors.white),
+      ],
+    );
   }
 
-  @override
-  bool shouldRepaint(MiciWheelPainter old) => old.color != color;
+  Widget _row(String label, String value, Color valueColor) {
+    return _pill(
+      unit,
+      height: 20,
+      padding: 8,
+      radius: 7,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(color: HudColors.grey, fontSize: 8.5 * unit, fontWeight: FontWeight.w600, height: 1.0),
+          ),
+          SizedBox(width: 6 * unit),
+          Text(
+            value,
+            style: TextStyle(
+              color: valueColor,
+              fontSize: 12 * unit,
+              fontWeight: FontWeight.bold,
+              height: 1.0,
+              // digits of equal width, so the pill does not jitter as the angle changes
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // -- driver monitoring icon --

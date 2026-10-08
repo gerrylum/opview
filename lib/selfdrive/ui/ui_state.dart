@@ -53,6 +53,10 @@ class UIState extends ChangeNotifier {
   bool vEgoClusterSeen = false;
   double steeringAngleDeg = 0.0;
 
+  // carControl.actuators.steeringAngleDeg: the angle openpilot is asking for. Cars that
+  // steer by torque alone leave it at 0; the Rivian branches always fill it in
+  double targetSteeringAngleDeg = 0.0;
+
   // selfdriveState
   bool enabled = false;
   bool engageable = false;
@@ -443,6 +447,7 @@ class UIState extends ChangeNotifier {
 
   void applyCarControl(Map<String, dynamic> data) {
     latActive = data['latActive'] as bool? ?? false;
+    targetSteeringAngleDeg = (data['actuators']?['steeringAngleDeg'] as num?)?.toDouble() ?? 0.0;
   }
 
   /// lateral_mode.py: on an angle-capable Rivian while MADS steers, the car sends no CAN
@@ -471,6 +476,17 @@ class UIState extends ChangeNotifier {
   }
 
   // -- derived values --
+
+  /// how openpilot is steering right now, or null when it is not steering.
+  /// an angle-capable Rivian switches between the two while driving; other cars
+  /// report the controller they use
+  LateralMode? get steeringMode {
+    if (!latActive) return null;
+    if (lateralMode != null) return lateralMode;
+    if (lateralControlKind == 'angleState') return LateralMode.angle;
+    if (lateralControlKind == 'torqueState') return LateralMode.torque;
+    return null;
+  }
 
   /// how confident the model is that no takeover is coming, 0..1; -0.5 while
   /// disengaged so the ball slides off the bottom (confidence_ball.py)
