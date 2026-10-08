@@ -174,7 +174,7 @@ class ModelRendererPainter extends CustomPainter {
     final base = Color.lerp(pathEdgeNoThrottleColor, pathEdgeThrottleColor, state.throttleBlend.clamp(0.0, 1.0))!;
     final paint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = max(1.5, 4 * contentRect.height / 1080.0)
+      ..strokeWidth = max(2.0, 6 * contentRect.height / 1080.0)
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..shader = ui.Gradient.linear(
