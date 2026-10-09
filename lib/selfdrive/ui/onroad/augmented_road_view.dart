@@ -96,7 +96,8 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
         );
 
         final settings = widget.settings;
-        final clockMode = settings?.clockMode ?? ClockMode.off;
+        final clockMode = settings?.clockMode ?? ClockMode.h12;
+        final speedLimitDisplay = settings?.speedLimitDisplay ?? SpeedLimitDisplay.auto;
         final layout = settings?.layout ?? OnroadLayout.classic;
 
         return MediaQuery(
@@ -112,6 +113,9 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
                 DetailedLayout(
                   uiState: widget.uiState,
                   clockMode: clockMode,
+                  speedLimitDisplay: speedLimitDisplay,
+                  collapsedPanels: settings?.collapsedPanels ?? const <String>{},
+                  onTogglePanel: settings?.togglePanel,
                   frameFor: _fullScreenFrame,
                   videoBuilder: _videoLayer,
                 )
@@ -119,6 +123,7 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
                 EnhancedLayout(
                   uiState: widget.uiState,
                   clockMode: clockMode,
+                  speedLimitDisplay: speedLimitDisplay,
                   frameFor: _fullScreenFrame,
                   videoBuilder: _videoLayer,
                 )
@@ -146,7 +151,7 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        HudRenderer(uiState: widget.uiState, scale: scale),
+                        HudRenderer(uiState: widget.uiState, scale: scale, speedLimitDisplay: speedLimitDisplay),
                         if (clockMode != ClockMode.off) ClockRenderer(mode: clockMode, scale: scale),
                         AlertRenderer(uiState: widget.uiState, scale: scale),
                       ],

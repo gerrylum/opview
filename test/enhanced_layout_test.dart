@@ -10,6 +10,7 @@ import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/enhanced/enhanced_layout.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
+import 'package:opview/selfdrive/ui/onroad/top_row.dart';
 import 'package:opview/selfdrive/ui/onroad/turn_signal_renderer.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/impl/cereal_adapter.dart';
@@ -24,7 +25,7 @@ void _screen(WidgetTester tester, double w, double h) {
   addTearDown(tester.view.resetDevicePixelRatio);
 }
 
-AppSettings _enhanced({ClockMode clock = ClockMode.off}) {
+AppSettings _enhanced({ClockMode clock = ClockMode.h12}) {
   final s = AppSettings();
   s.layout = OnroadLayout.enhanced;
   s.clockMode = clock;
@@ -380,31 +381,60 @@ void main() {
       expect(speed.top, lessThan(1080 * 0.3));
     });
 
-    testWidgets('set speed and clock are matching pills either side of the speed', (tester) async {
+    testWidgets('set speed and speed limit are matching pills either side of the speed, tops in line', (tester) async {
       _screen(tester, 1920, 1080);
-      await tester.pumpWidget(_app(createMockUIState(), _enhanced(clock: ClockMode.h24)));
-      expect(find.byType(EnhancedTopRow), findsOneWidget);
+      final state = createMockUIState()
+        ..paramsSeen = true
+        ..speedLimitMode = 1
+        ..speedLimitValid = true
+        ..speedLimit = 25;
+      await tester.pumpWidget(_app(state, _enhanced()));
+      expect(find.byType(SpeedTopRow), findsOneWidget);
       expect(find.text('MAX'), findsOneWidget);
       expect(find.text('80'), findsOneWidget);
+      expect(find.text('LIMIT'), findsOneWidget);
 
-      final max = tester.getRect(find.byKey(const ValueKey('enhancedSetSpeed')));
-      final clock = tester.getRect(find.byKey(const ValueKey('enhancedClock')));
-      expect(max.size.width, closeTo(clock.size.width, 0.01));
-      expect(max.size.height, closeTo(clock.size.height, 0.01));
-      expect(max.width, closeTo(enhancedSidePillWidth * _unit, 0.01));
-      // mirrored about the centre of the screen
-      expect(960 - max.right, closeTo(clock.left - 960, 0.01));
-      expect(max.center.dy, closeTo(clock.center.dy, 0.01));
-      expect(find.descendant(of: find.byKey(const ValueKey('enhancedClock')), matching: find.byType(ClockText)),
-          findsOneWidget);
+      final max = tester.getRect(find.byKey(const ValueKey('topRowSetSpeed')));
+      final limit = tester.getRect(find.byKey(const ValueKey('topRowSpeedLimit')));
+      final speed = tester.getRect(find.ancestor(of: find.text('65'), matching: find.byType(Container)).first);
+      expect(max.size, limit.size);
+      expect(max.width, closeTo(topRowSidePillWidth * _unit, 0.01));
+      expect(max.height, closeTo(topRowSidePillHeight * _unit, 0.01));
+      // mirrored about the centre of the screen, tops level with the speed pill
+      expect(960 - max.right, closeTo(limit.left - 960, 0.01));
+      expect(max.top, closeTo(speed.top, 0.01));
+      expect(limit.top, closeTo(speed.top, 0.01));
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('no clock pill when the clock is off', (tester) async {
+    testWidgets('a small 12 hour clock in the top right corner', (tester) async {
       _screen(tester, 1920, 1080);
       await tester.pumpWidget(_app(createMockUIState(), _enhanced()));
-      expect(find.byKey(const ValueKey('enhancedClock')), findsNothing);
+      final clock = find.byKey(const ValueKey('enhancedClock'));
+      final r = tester.getRect(clock);
+      expect(r.right, closeTo(1920 - _edge, 0.01));
+      expect(r.top, closeTo(_edge, 0.01));
+      expect(r.width, closeTo(enhancedClockWidth * _unit, 0.01));
+      expect(r.height, closeTo(enhancedClockHeight * _unit, 0.01));
+      expect(tester.widget<ClockText>(find.descendant(of: clock, matching: find.byType(ClockText))).mode, ClockMode.h12);
+      // the speed stays centred with nothing beside it
       expect(tester.getRect(find.text('65')).center.dx, closeTo(960, 1.0));
+    });
+
+    testWidgets('speed limit pill follows the setting', (tester) async {
+      _screen(tester, 1920, 1080);
+      final state = createMockUIState()
+        ..paramsSeen = true
+        ..speedLimitMode = 1;
+      final pill = find.byKey(const ValueKey('topRowSpeedLimit'));
+      await tester.pumpWidget(_app(state, _enhanced()));
+      expect(pill, findsNothing);  // Auto, and no limit yet
+      await tester.pumpWidget(_app(state, _enhanced()..speedLimitDisplay = SpeedLimitDisplay.always));
+      expect(find.descendant(of: pill, matching: find.text('– –')), findsOneWidget);
+      // turned off on the comma: never shown
+      state.speedLimitMode = speedLimitModeOff;
+      await tester.pumpWidget(_app(state, _enhanced()..speedLimitDisplay = SpeedLimitDisplay.always));
+      expect(pill, findsNothing);
     });
 
     testWidgets('lays out without errors on every screen shape', (tester) async {
@@ -474,6 +504,90 @@ void main() {
       expect(find.byIcon(Icons.person), findsOneWidget);
       final icon = tester.widget<Opacity>(find.ancestor(of: find.byIcon(Icons.person), matching: find.byType(Opacity)).first);
       expect(icon.opacity, lessThan(1.0));
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('confidence', () {
+    test('the target follows the disengage predictions for the active mode', () {
+      final s = createMockUIState();
+      s.applyModelV2({
+        'meta': {
+          'disengagePredictions': {
+            'brakeDisengageProbs': [0.1, 0.4],
+            'steerOverrideProbs': [0.2, 0.05],
+          },
+        },
+      });
+      expect(s.confidenceSeen, true);
+      s.status = UIStatus.engaged;
+      expect(s.confidenceTarget, closeTo(0.6 * 0.8, 1e-9));
+      s.status = UIStatus.latOnly;
+      expect(s.confidenceTarget, closeTo(0.8, 1e-9));
+      s.status = UIStatus.longOnly;
+      expect(s.confidenceTarget, closeTo(0.6, 1e-9));
+    });
+
+    test('the shown value eases towards the target rather than jumping', () {
+      final s = createMockUIState()..status = UIStatus.engaged;
+      final bad = {
+        'meta': {
+          'disengagePredictions': {'brakeDisengageProbs': [0.9], 'steerOverrideProbs': [0.0]},
+        },
+      };
+      s.applyModelV2(bad);
+      expect(s.confidenceFiltered, lessThan(1.0));
+      expect(s.confidenceFiltered, greaterThan(0.5));
+      for (var i = 0; i < 100; i++) {
+        s.applyModelV2(bad);
+      }
+      expect(s.confidenceFiltered, closeTo(0.1, 0.01));
+    });
+
+    test('dot size and colour', () {
+      expect(confidenceDotRadius(0), closeTo(0.08, 1e-9));
+      expect(confidenceDotRadius(1), closeTo(0.34, 1e-9));
+      expect(confidenceDotRadius(2), closeTo(0.34, 1e-9));
+      expect(confidenceColors(0.9).$1, const Color(0xFF00FFCC));
+      expect(confidenceColors(0.3).$1, const Color(0xFFFFC800));
+      expect(confidenceColors(0.1).$1, const Color(0xFFFF0015));
+    });
+
+    testWidgets('beside the driver icon, the same size; empty and dimmed until engaged with data', (tester) async {
+      _screen(tester, 1920, 1080);
+      final state = createMockUIState();
+      state.applyDriverMonitoringState({'faceDetected': true});
+      await tester.pumpWidget(_app(state, _enhanced()));
+      final ind = find.byKey(const ValueKey('confidenceIndicator'));
+      final driver = tester.getRect(find.byKey(const ValueKey('driverIcon')));
+      final conf = tester.getRect(ind);
+      expect(driver.width, closeTo(enhancedDriverIconSize * _unit, 0.01));
+      expect(conf.size, driver.size);
+      expect(conf.top, closeTo(_edge, 0.01));
+      expect(conf.left, closeTo(driver.right + 6 * _unit, 0.01));
+
+      ConfidencePainter painter() => tester
+          .widgetList<CustomPaint>(find.descendant(of: ind, matching: find.byType(CustomPaint)))
+          .map((p) => p.painter)
+          .whereType<ConfidencePainter>()
+          .single;
+      Opacity opacity() => tester.widget<Opacity>(find.descendant(of: ind, matching: find.byType(Opacity)));
+      // no predictions yet
+      expect(painter().confidence, isNull);
+      expect(opacity().opacity, lessThan(1.0));
+
+      state.applyModelV2({
+        'meta': {
+          'disengagePredictions': {'brakeDisengageProbs': [0.0], 'steerOverrideProbs': [0.0]},
+        },
+      });
+      await tester.pumpWidget(_app(state, _enhanced()));
+      expect(painter().confidence, isNotNull);
+      expect(opacity().opacity, 1.0);
+
+      state.status = UIStatus.disengaged;
+      await tester.pumpWidget(_app(state, _enhanced()));
+      expect(painter().confidence, isNull);
       expect(tester.takeException(), isNull);
     });
   });

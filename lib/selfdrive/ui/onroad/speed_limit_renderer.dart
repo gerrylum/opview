@@ -97,11 +97,19 @@ class SpeedLimitRenderer extends StatelessWidget {
   final UIState uiState;
   final double scale;
 
-  const SpeedLimitRenderer({super.key, required this.uiState, required this.scale});
+  /// the app's speed limit setting
+  final SpeedLimitDisplay display;
+
+  const SpeedLimitRenderer({
+    super.key,
+    required this.uiState,
+    required this.scale,
+    this.display = SpeedLimitDisplay.auto,
+  });
 
   @override
   Widget build(BuildContext context) {
-    if (!uiState.showSpeedLimit) return const SizedBox.shrink();
+    if (!uiState.speedLimitVisible(display)) return const SizedBox.shrink();
 
     final st = uiState;
     final width = st.isMetric ? _setSpeedWidthMetric : _setSpeedWidthImperial;

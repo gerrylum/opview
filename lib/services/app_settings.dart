@@ -1,28 +1,24 @@
 // app settings — viewer-side choices that live on this device, not on the comma
-// stored with shared_preferences; every default leaves the original display unchanged
+// stored with shared_preferences
 
 import 'package:flutter/foundation.dart';
+import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// clock on the driving display
 enum ClockMode { off, system, h12, h24 }
 
-/// short names for the settings menu; Auto follows this device's own 12/24 hour setting
-String clockModeLabel(ClockMode mode) {
-  switch (mode) {
-    case ClockMode.off:
-      return 'Off';
-    case ClockMode.h12:
-      return '12 hour';
-    case ClockMode.h24:
-      return '24 hour';
-    case ClockMode.system:
+/// speed limit choices, in the order the settings menu offers them
+String speedLimitDisplayLabel(SpeedLimitDisplay d) {
+  switch (d) {
+    case SpeedLimitDisplay.auto:
       return 'Auto';
+    case SpeedLimitDisplay.always:
+      return 'Always';
+    case SpeedLimitDisplay.off:
+      return 'Off';
   }
 }
-
-/// the order the clock choices are offered in
-const clockModeChoices = [ClockMode.off, ClockMode.h12, ClockMode.h24, ClockMode.system];
 
 /// which driving display to draw
 enum OnroadLayout { classic, enhanced, detailed }
@@ -41,28 +37,45 @@ String onroadLayoutLabel(OnroadLayout layout) {
 /// what the Enhanced layout was saved as before it was renamed
 const _legacyLayoutNames = {'miciExtended': OnroadLayout.enhanced};
 
-const _clockModeKey = 'clock_mode';
 const _layoutKey = 'onroad_layout';
+const _speedLimitKey = 'speed_limit_display';
+const _collapsedKey = 'detailed_collapsed_panels';
 
 class AppSettings extends ChangeNotifier {
-  ClockMode clockMode = ClockMode.off;
+  /// the clock is always shown, in 12 hour time; no longer a setting
+  ClockMode clockMode = ClockMode.h12;
   OnroadLayout layout = OnroadLayout.classic;
+  SpeedLimitDisplay speedLimitDisplay = SpeedLimitDisplay.auto;
+
+  /// Detailed panels the driver has tapped shut, by name
+  final Set<String> collapsedPanels = {};
 
   /// read saved settings; unknown or missing values keep the defaults
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
-    clockMode = _byName(ClockMode.values, prefs.getString(_clockModeKey), ClockMode.off);
+    speedLimitDisplay = _byName(SpeedLimitDisplay.values, prefs.getString(_speedLimitKey), SpeedLimitDisplay.auto);
+    collapsedPanels
+      ..clear()
+      ..addAll(prefs.getStringList(_collapsedKey) ?? const []);
     final savedLayout = prefs.getString(_layoutKey);
     layout = _legacyLayoutNames[savedLayout] ?? _byName(OnroadLayout.values, savedLayout, OnroadLayout.classic);
     notifyListeners();
   }
 
-  Future<void> setClockMode(ClockMode mode) async {
-    if (mode == clockMode) return;
-    clockMode = mode;
+  Future<void> setSpeedLimitDisplay(SpeedLimitDisplay value) async {
+    if (value == speedLimitDisplay) return;
+    speedLimitDisplay = value;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_clockModeKey, mode.name);
+    await prefs.setString(_speedLimitKey, value.name);
+  }
+
+  /// open a collapsed Detailed panel, or collapse an open one
+  Future<void> togglePanel(String name) async {
+    if (!collapsedPanels.remove(name)) collapsedPanels.add(name);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_collapsedKey, collapsedPanels.toList()..sort());
   }
 
   Future<void> setLayout(OnroadLayout value) async {

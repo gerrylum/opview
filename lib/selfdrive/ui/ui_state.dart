@@ -39,6 +39,10 @@ const defaultMaxLatAccel = 3.0;
 /// how the wheel icon is tinted while MADS steers an angle-capable Rivian
 enum LateralMode { angle, torque }
 
+/// the app's speed limit setting: auto shows it once the comma has sent a limit
+/// this drive, always shows it (dashes without data), off never shows it
+enum SpeedLimitDisplay { auto, always, off }
+
 // -- state --
 
 class UIState extends ChangeNotifier {
@@ -94,6 +98,13 @@ class UIState extends ChangeNotifier {
   double dmAwarenessPercent = 100.0;
   double dmRotationDeg = 90.0;       // which way the head is turned, smoothed; 90 = straight ahead
   String dmPolicy = '';              // which monitoring policy is in charge, e.g. 'vision'
+
+  // modelV2.meta.disengagePredictions: largest value of each list (the comma sends
+  // them on branches whose webrtcd includes them)
+  bool confidenceSeen = false;
+  double brakeDisengageProb = 0.0;
+  double steerOverrideProb = 0.0;
+  double confidenceFiltered = 1.0;  // smoothed, 0..1
 
   // modelV2 — raw lists from cereal
   List<double> pathX = [];
@@ -185,6 +196,9 @@ class UIState extends ChangeNotifier {
   double speedLimitFinalLast = 0.0;
   String speedLimitSource = 'none';
   String speedLimitAssistState = 'disabled';
+
+  /// a speed limit has arrived at some point since connecting
+  bool speedLimitSeen = false;
 
   // liveMapDataSP — speeds in m/s, distance in m
   bool speedLimitAheadValid = false;
@@ -315,6 +329,16 @@ class UIState extends ChangeNotifier {
     _fillDoublesFixed(roadEdgeStds, data['roadEdgeStds'], 2);
     _fillDoubles(accelerationX, data['acceleration']?['x']);
 
+    // confidence (mici confidence_ball.py)
+    final predictions = data['meta']?['disengagePredictions'];
+    if (predictions is Map) {
+      confidenceSeen = true;
+      brakeDisengageProb = _largest(predictions['brakeDisengageProbs']);
+      steerOverrideProb = _largest(predictions['steerOverrideProbs']);
+    }
+    // first-order filter, tau 0.5 s at ~20 Hz
+    confidenceFiltered += 0.09 * (confidenceTarget - confidenceFiltered);
+
     // smooth throttle blend: first-order filter (tau=0.25s at ~20Hz → k≈0.167)
     const k = 0.167; // dt / (tau + dt) = 0.05 / (0.25 + 0.05)
     final target = allowThrottle ? 1.0 : 0.0;
@@ -439,6 +463,7 @@ class UIState extends ChangeNotifier {
     speedLimitFinalLast = (resolver['speedLimitFinalLast'] as num?)?.toDouble() ?? 0.0;
     speedLimitSource = resolver['source'] as String? ?? 'none';
     speedLimitAssistState = assist['state'] as String? ?? 'disabled';
+    if ((speedLimitValid && speedLimit > 0) || (speedLimitLastValid && speedLimitLast > 0)) speedLimitSeen = true;
     // no notify — picked up on next modelV2
   }
 
@@ -566,6 +591,14 @@ class UIState extends ChangeNotifier {
   /// show the speed limit sign (speed_limit.py: SpeedLimitMode != off)
   bool get showSpeedLimit => paramsSeen && speedLimitMode != speedLimitModeOff;
 
+  /// the speed limit sign or pill, under the app's speed limit setting; never while
+  /// speed limits are turned off on the comma
+  bool speedLimitVisible(SpeedLimitDisplay setting) {
+    if (setting == SpeedLimitDisplay.off || !showSpeedLimit) return false;
+    if (setting == SpeedLimitDisplay.always || speedLimitSeen) return true;
+    return (speedLimitValid && speedLimit > 0) || (speedLimitLastValid && speedLimitLast > 0);
+  }
+
   /// show the road name pill (road_name.py)
   bool get showRoadName => roadNameToggle && roadName.isNotEmpty;
 
@@ -602,6 +635,22 @@ class UIState extends ChangeNotifier {
   /// is cruise available (not -1)
   bool get isCruiseAvailable => _rawSetSpeed != -1;
 
+  /// how confident the driving model is that no takeover is coming, 0..1
+  /// (confidence_ball.py): steering only counts steer overrides, cruise only
+  /// counts brake disengages, engaged counts both
+  double get confidenceTarget {
+    switch (status) {
+      case UIStatus.latOnly:
+        return 1 - steerOverrideProb;
+      case UIStatus.longOnly:
+        return 1 - brakeDisengageProb;
+      case UIStatus.disengaged:
+      case UIStatus.engaged:
+      case UIStatus.override_:
+        return (1 - brakeDisengageProb) * (1 - steerOverrideProb);
+    }
+  }
+
   /// sideways acceleration openpilot wants and what the car is doing, m/s^2, from
   /// controlsState's curvatures; the same in angle and torque mode
   double get latAccelWant => desiredCurvature * vEgo * vEgo;
@@ -622,6 +671,18 @@ class UIState extends ChangeNotifier {
   }
 
   // -- helpers --
+
+  /// the largest number in a list, 0 for none
+  double _largest(dynamic list) {
+    var m = 0.0;
+    if (list is List) {
+      for (final v in list) {
+        final d = (v as num?)?.toDouble() ?? 0.0;
+        if (d > m) m = d;
+      }
+    }
+    return m;
+  }
 
   /// Clear [target] and refill from [source] — reuses the existing list.
   void _fillDoubles(List<double> target, dynamic source) {

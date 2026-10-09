@@ -2,9 +2,10 @@
 //
 // the camera fills the screen inside a rounded border in the engagement colour, and
 // everything else is drawn over it in dark pills:
-//   - top row, centred on the speed: set speed | speed | clock
+//   - top row, centred on the speed: set speed | speed | speed limit (top_row.dart)
 //   - road name under the speed
-//   - driver monitoring icon, top left
+//   - driver monitoring icon and model confidence, top left
+//   - a small clock, top right
 //   - steering readout, bottom left: angle or torque mode, target and actual angle
 //   - lead car readout, bottom right: time gap, speed difference, the lead's speed
 //   - torque bar, bottom centre
@@ -26,6 +27,7 @@ import 'package:opview/selfdrive/ui/onroad/exp_button.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/throttled.dart';
+import 'package:opview/selfdrive/ui/onroad/top_row.dart';
 import 'package:opview/services/app_settings.dart';
 
 // -- sizes, in comma four pixels --
@@ -35,10 +37,10 @@ const enhancedRefHeight = 240.0;
 const enhancedCornerRadius = 12.0;
 const enhancedBorderWidth = 4.0;
 const enhancedMargin = 16.0;          // gap between the border and the corner elements
-const enhancedDriverIconSize = 54.0;
+const enhancedDriverIconSize = 48.6;  // also the confidence indicator
+const enhancedClockWidth = 60.0;      // corner clock
+const enhancedClockHeight = 16.0;
 const enhancedSpeedPillHeight = 52.0;
-const enhancedSidePillWidth = 116.0;  // set speed and clock, either side of the speed
-const enhancedSidePillHeight = 40.0;
 const enhancedInfoPillWidth = 100.0;  // steering and lead readouts
 const enhancedInfoPillHeight = 20.0;
 const enhancedInfoPillGap = 4.0;
@@ -115,6 +117,7 @@ double enhancedUnit(Size screen) => min(screen.height / enhancedRefHeight, scree
 class EnhancedLayout extends StatelessWidget {
   final UIState uiState;
   final ClockMode clockMode;
+  final SpeedLimitDisplay speedLimitDisplay;
 
   /// where the camera image goes and the matching overlay transform, for the whole
   /// screen; the same framing as the Classic layout
@@ -125,6 +128,7 @@ class EnhancedLayout extends StatelessWidget {
     super.key,
     required this.uiState,
     required this.clockMode,
+    this.speedLimitDisplay = SpeedLimitDisplay.auto,
     required this.frameFor,
     required this.videoBuilder,
   });
@@ -221,13 +225,13 @@ class EnhancedLayout extends StatelessWidget {
               painter: EnhancedTorqueBarPainter(value: st.torqueBarValue, status: st.status, unit: unit),
             ),
 
-            // top row: set speed | speed | clock, with the speed centred
+            // top row: set speed | speed | speed limit, with the speed centred
             Positioned(
               top: edge,
               left: 0,
               right: 0,
               height: enhancedSpeedPillHeight * unit,
-              child: EnhancedTopRow(uiState: st, unit: unit, clockMode: clockMode),
+              child: SpeedTopRow(uiState: st, unit: unit, speedLimitDisplay: speedLimitDisplay),
             ),
 
             // road name under the speed
@@ -239,30 +243,15 @@ class EnhancedLayout extends StatelessWidget {
                 child: Center(child: _roadName(st.roadName, unit, w)),
               ),
 
-            // driver monitoring, top left: the cone points where the driver's head is
-            // turned; dimmed, without a cone, when camera monitoring is not running
-            // shown whenever the car is on and the comma reports on the driver; dimmed and
-            // without the cone while not engaged or while camera monitoring is not running
-            if (st.started && st.dmSeen)
+            // driver monitoring and model confidence, top left
+            ...enhancedDriverAndConfidence(st, unit, edge),
+
+            // small clock, top right
+            if (clockMode != ClockMode.off)
               Positioned(
-                left: edge,
+                right: edge,
                 top: edge,
-                width: enhancedDriverIconSize * unit,
-                height: enhancedDriverIconSize * unit,
-                child: Opacity(
-                  opacity: enhancedDriverIconLive(st) ? 1.0 : 0.35,
-                  child: CustomPaint(
-                    painter: EnhancedDriverIconPainter(
-                      coneColor: enhancedDriverIconLive(st)
-                          ? enhancedDriverConeColor(awarenessFull: !st.dmAwarenessUnfull)
-                          : null,
-                      rotationDeg: st.dmRotationDeg,
-                    ),
-                    child: Center(
-                      child: Icon(Icons.person, color: Colors.white, size: enhancedDriverIconSize * unit * 0.62),
-                    ),
-                  ),
-                ),
+                child: EnhancedCornerClock(unit: unit, clockMode: clockMode),
               ),
 
             // steering readout, bottom left
@@ -296,36 +285,6 @@ class EnhancedLayout extends StatelessWidget {
 }
 
 // -- pills --
-
-/// dark rounded box as wide as its content
-Widget _pill(double unit, {required double height, required Widget child, double minWidth = 0}) {
-  return Container(
-    height: height * unit,
-    constraints: BoxConstraints(minWidth: minWidth * unit),
-    padding: EdgeInsets.symmetric(horizontal: 12 * unit),
-    decoration: BoxDecoration(
-      color: _pillColor,
-      borderRadius: BorderRadius.circular(12 * unit),
-    ),
-    child: Center(widthFactor: 1, child: child),
-  );
-}
-
-/// dark rounded box of a fixed size; the content is centred and shrinks to fit
-Widget _fixedPill(double unit, {required double width, required double height, required Widget child, Key? key}) {
-  return Container(
-    key: key,
-    width: width * unit,
-    height: height * unit,
-    padding: EdgeInsets.symmetric(horizontal: 10 * unit),
-    alignment: Alignment.center,
-    decoration: BoxDecoration(
-      color: _pillColor,
-      borderRadius: BorderRadius.circular(12 * unit),
-    ),
-    child: FittedBox(fit: BoxFit.scaleDown, child: child),
-  );
-}
 
 /// one line of a readout: small grey label on the left, value on the right. All of
 /// them are the same width, so the values line up; a long value shrinks to fit
@@ -393,121 +352,6 @@ Widget _roadName(String name, double unit, double screenW) {
       ),
     ),
   );
-}
-
-// -- top row --
-
-/// speed in a pill at top centre, with matching set speed and clock pills either
-/// side; the speed stays centred whatever is shown beside it
-class EnhancedTopRow extends StatelessWidget {
-  final UIState uiState;
-  final double unit;
-  final ClockMode clockMode;
-
-  const EnhancedTopRow({super.key, required this.uiState, required this.unit, required this.clockMode});
-
-  @override
-  Widget build(BuildContext context) {
-    final st = uiState;
-    final gap = SizedBox(width: 8 * unit);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Expanded(
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: st.isCruiseAvailable ? _setSpeed() : const SizedBox.shrink(),
-          ),
-        ),
-        gap,
-        _speed(),
-        gap,
-        Expanded(
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: clockMode != ClockMode.off ? _clock() : const SizedBox.shrink(),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// the number with its unit underneath
-  Widget _speed() {
-    return _pill(
-      unit,
-      height: enhancedSpeedPillHeight,
-      minWidth: 74,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '${uiState.displaySpeed.round()}',
-            style: TextStyle(color: HudColors.white, fontSize: 33 * unit, fontWeight: FontWeight.bold, height: 0.95),
-          ),
-          Text(
-            uiState.isMetric ? 'km/h' : 'mph',
-            style: TextStyle(color: _labelColor, fontSize: 11 * unit, fontWeight: FontWeight.w600, height: 1.0),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// small "MAX" then the number; label colours as on the Classic MAX box
-  Widget _setSpeed() {
-    final st = uiState;
-    Color maxColor = HudColors.grey;
-    Color speedColor = HudColors.grey;
-    if (st.isCruiseSet) {
-      speedColor = HudColors.white;
-      if (st.status == UIStatus.engaged) {
-        maxColor = HudColors.engaged;
-      } else if (st.status == UIStatus.disengaged) {
-        maxColor = HudColors.disengaged;
-      } else if (st.status == UIStatus.override_) {
-        maxColor = HudColors.override_;
-      }
-    }
-    return _fixedPill(
-      unit,
-      key: const ValueKey('enhancedSetSpeed'),
-      width: enhancedSidePillWidth,
-      height: enhancedSidePillHeight,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.baseline,
-        textBaseline: TextBaseline.alphabetic,
-        children: [
-          Text(
-            'MAX',
-            style: TextStyle(color: maxColor, fontSize: 11 * unit, fontWeight: FontWeight.w600, height: 1.0),
-          ),
-          SizedBox(width: 5 * unit),
-          Text(
-            st.isCruiseSet ? '${st.setSpeed.round()}' : '–',
-            style: TextStyle(color: speedColor, fontSize: 24 * unit, fontWeight: FontWeight.bold, height: 1.0),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// the mirror of the set speed pill: the time, then a small AM/PM
-  Widget _clock() {
-    return _fixedPill(
-      unit,
-      key: const ValueKey('enhancedClock'),
-      width: enhancedSidePillWidth,
-      height: enhancedSidePillHeight,
-      child: ClockText(
-        mode: clockMode,
-        style: TextStyle(color: HudColors.white, fontSize: 24 * unit, fontWeight: FontWeight.bold, height: 1.0),
-        suffixStyle: TextStyle(color: _labelColor, fontSize: 11 * unit, fontWeight: FontWeight.w600, height: 1.0),
-        suffixGap: 5 * unit,
-      ),
-    );
-  }
 }
 
 // -- steering readout --
@@ -739,6 +583,133 @@ class EnhancedDriverIconPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(EnhancedDriverIconPainter old) => old.coneColor != coneColor || old.rotationDeg != rotationDeg;
+}
+
+// -- driver monitoring and confidence, top left --
+
+/// the model confidence indicator shows a dot only while openpilot is engaged in some
+/// form and confidence data has arrived; otherwise it is an empty, dimmed ring
+bool enhancedConfidenceLive(UIState st) => st.status != UIStatus.disengaged && st.confidenceSeen;
+
+/// the driver monitoring icon at the top left corner and the confidence indicator
+/// beside it, the same size; for the Enhanced and Detailed layouts' Stacks
+List<Widget> enhancedDriverAndConfidence(UIState st, double unit, double edge) {
+  final size = enhancedDriverIconSize * unit;
+  if (!st.started) return const [];
+  final driverLive = enhancedDriverIconLive(st);
+  final confLive = enhancedConfidenceLive(st);
+  return [
+    // shown whenever the comma reports on the driver: the cone points where the
+    // driver's head is turned; dimmed, without the cone, while not engaged or while
+    // camera monitoring is not running
+    if (st.dmSeen)
+      Positioned(
+        key: const ValueKey('driverIcon'),
+        left: edge,
+        top: edge,
+        width: size,
+        height: size,
+        child: Opacity(
+          opacity: driverLive ? 1.0 : 0.35,
+          child: CustomPaint(
+            painter: EnhancedDriverIconPainter(
+              coneColor: driverLive ? enhancedDriverConeColor(awarenessFull: !st.dmAwarenessUnfull) : null,
+              rotationDeg: st.dmRotationDeg,
+            ),
+            child: Center(child: Icon(Icons.person, color: Colors.white, size: size * 0.62)),
+          ),
+        ),
+      ),
+    Positioned(
+      key: const ValueKey('confidenceIndicator'),
+      left: edge + size + 6 * unit,
+      top: edge,
+      width: size,
+      height: size,
+      child: Opacity(
+        opacity: confLive ? 1.0 : 0.35,
+        child: CustomPaint(painter: ConfidencePainter(confidence: confLive ? st.confidenceFiltered : null)),
+      ),
+    ),
+  ];
+}
+
+/// colours of the comma four's confidence ball (mici confidence_ball.py): green when
+/// confident, amber when unsure, red when about to disengage
+(Color, Color) confidenceColors(double c) {
+  if (c > 0.5) return (const Color(0xFF00FFCC), const Color(0xFF00FF26));
+  if (c > 0.2) return (const Color(0xFFFFC800), const Color(0xFFFF7300));
+  return (const Color(0xFFFF0015), const Color(0xFFFF0059));
+}
+
+/// radius of the confidence dot as a share of the indicator's size
+double confidenceDotRadius(double confidence) => 0.08 + 0.26 * confidence.clamp(0.0, 1.0).toDouble();
+
+/// dark disc with a fixed thin ring; the dot inside grows with confidence and shrinks
+/// as a disengagement becomes likely. [confidence] null draws the ring alone
+class ConfidencePainter extends CustomPainter {
+  final double? confidence;
+
+  const ConfidencePainter({required this.confidence});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.shortestSide;
+    final c = size.center(Offset.zero);
+    canvas.drawCircle(c, s / 2, Paint()..color = _discColor);
+    canvas.drawCircle(
+      c,
+      s * 0.40,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = s * 0.045
+        ..color = const Color(0x2EFFFFFF),
+    );
+    final conf = confidence;
+    if (conf == null) return;
+    final r = s * confidenceDotRadius(conf);
+    final (top, bottom) = confidenceColors(conf.clamp(0.0, 1.0).toDouble());
+    final rect = Rect.fromCircle(center: c, radius: r);
+    canvas.drawCircle(
+      c,
+      r,
+      Paint()..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [top, bottom]).createShader(rect),
+    );
+  }
+
+  @override
+  bool shouldRepaint(ConfidencePainter old) => old.confidence != confidence;
+}
+
+// -- clock, top right --
+
+/// a small time pill in the top right corner, with a smaller AM/PM
+class EnhancedCornerClock extends StatelessWidget {
+  final double unit;
+  final ClockMode clockMode;
+
+  const EnhancedCornerClock({super.key, required this.unit, required this.clockMode});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const ValueKey('enhancedClock'),
+      width: enhancedClockWidth * unit,
+      height: enhancedClockHeight * unit,
+      padding: EdgeInsets.symmetric(horizontal: 4 * unit),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(color: const Color(0xB3141414), borderRadius: BorderRadius.circular(6 * unit)),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: ClockText(
+          mode: clockMode,
+          style: TextStyle(color: HudColors.white, fontSize: 9 * unit, fontWeight: FontWeight.bold, height: 1.0),
+          suffixStyle: TextStyle(color: _labelColor, fontSize: 5 * unit, fontWeight: FontWeight.w600, height: 1.0),
+          suffixGap: 1.5 * unit,
+        ),
+      ),
+    );
+  }
 }
 
 // -- torque bar (mici/onroad/torque_bar.py) --

@@ -35,27 +35,36 @@ void main() {
   });
 
   group('AppSettings', () {
-    test('defaults leave the original display unchanged', () {
-      expect(AppSettings().clockMode, ClockMode.off);
+    test('defaults: a 12 hour clock, the speed limit on Auto, every panel open', () {
+      final s = AppSettings();
+      expect(s.clockMode, ClockMode.h12);
+      expect(s.speedLimitDisplay, SpeedLimitDisplay.auto);
+      expect(s.collapsedPanels, isEmpty);
     });
 
-    test('saves and reloads the clock mode', () async {
+    test('a clock setting saved by an older build is ignored', () async {
+      SharedPreferences.setMockInitialValues({'clock_mode': 'off'});
+      final s = AppSettings();
+      await s.load();
+      expect(s.clockMode, ClockMode.h12);
+    });
+
+    test('saves and reloads the speed limit choice', () async {
       SharedPreferences.setMockInitialValues({});
       final a = AppSettings();
       await a.load();
-      expect(a.clockMode, ClockMode.off);
-      await a.setClockMode(ClockMode.h24);
+      await a.setSpeedLimitDisplay(SpeedLimitDisplay.off);
 
       final b = AppSettings();
       await b.load();
-      expect(b.clockMode, ClockMode.h24);
+      expect(b.speedLimitDisplay, SpeedLimitDisplay.off);
     });
 
     test('an unknown saved value falls back to the default', () async {
-      SharedPreferences.setMockInitialValues({'clock_mode': 'sundial'});
+      SharedPreferences.setMockInitialValues({'speed_limit_display': 'sometimes'});
       final s = AppSettings();
       await s.load();
-      expect(s.clockMode, ClockMode.off);
+      expect(s.speedLimitDisplay, SpeedLimitDisplay.auto);
     });
 
     test('notifies listeners on change only', () async {
@@ -63,9 +72,23 @@ void main() {
       final s = AppSettings();
       var calls = 0;
       s.addListener(() => calls++);
-      await s.setClockMode(ClockMode.h12);
-      await s.setClockMode(ClockMode.h12);
+      await s.setSpeedLimitDisplay(SpeedLimitDisplay.always);
+      await s.setSpeedLimitDisplay(SpeedLimitDisplay.always);
       expect(calls, 1);
+    });
+
+    test('folded Detailed panels toggle and are remembered', () async {
+      SharedPreferences.setMockInitialValues({});
+      final a = AppSettings();
+      await a.load();
+      await a.togglePanel('lead');
+      await a.togglePanel('steering');
+      await a.togglePanel('steering');
+      expect(a.collapsedPanels, {'lead'});
+
+      final b = AppSettings();
+      await b.load();
+      expect(b.collapsedPanels, {'lead'});
     });
   });
 
@@ -104,7 +127,7 @@ void main() {
 
   group('settings menu', () {
     test('short names, in the order offered', () {
-      expect(clockModeChoices.map(clockModeLabel).toList(), ['Off', '12 hour', '24 hour', 'Auto']);
+      expect(SpeedLimitDisplay.values.map(speedLimitDisplayLabel).toList(), ['Auto', 'Always', 'Off']);
       expect(OnroadLayout.values.map(onroadLayoutLabel).toList(), ['Classic', 'Enhanced', 'Detailed']);
     });
 
@@ -216,15 +239,21 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
     }
 
-    testWidgets('no clock unless turned on', (tester) async {
+    testWidgets('Classic always shows a 12 hour clock', (tester) async {
       fullHd(tester);
-      final settings = AppSettings();
-      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: connected(), settings: settings)));
-      expect(find.byType(ClockRenderer), findsNothing);
-
-      settings.clockMode = ClockMode.h24;
-      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: connected(), settings: settings)));
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: connected(), settings: AppSettings())));
       expect(find.byType(ClockRenderer), findsOneWidget);
+      expect(tester.widget<ClockRenderer>(find.byType(ClockRenderer)).mode, ClockMode.h12);
+    });
+
+    testWidgets('the menu has no clock setting', (tester) async {
+      fullHd(tester);
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: connected(), settings: AppSettings())));
+      await tester.longPress(find.byType(AugmentedRoadView));
+      await tester.pumpAndSettle();
+      expect(find.text('CLOCK'), findsNothing);
+      expect(find.text('24 hour'), findsNothing);
+      expect(find.text('SPEED LIMIT'), findsOneWidget);
     });
 
     testWidgets('long press opens settings and a choice takes effect', (tester) async {
@@ -242,13 +271,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Settings'), findsOneWidget);
 
-      await tester.tap(find.text('24 hour'));
+      await tester.tap(find.text('Always'));
       await tester.pumpAndSettle();
-      expect(settings.clockMode, ClockMode.h24);
+      expect(settings.speedLimitDisplay, SpeedLimitDisplay.always);
 
-      await tester.tap(find.byIcon(Icons.close));
+      await tester.tap(find.text('Enhanced'));
       await tester.pumpAndSettle();
-      expect(find.byType(ClockRenderer), findsOneWidget);
+      expect(settings.layout, OnroadLayout.enhanced);
     });
 
     testWidgets('settings are reachable from the connecting screen', (tester) async {

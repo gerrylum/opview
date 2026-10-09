@@ -6,9 +6,11 @@ import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
 import 'package:opview/selfdrive/ui/onroad/detailed/detailed_layout.dart';
 import 'package:opview/selfdrive/ui/onroad/enhanced/enhanced_layout.dart';
 import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
+import 'package:opview/selfdrive/ui/onroad/top_row.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
 import 'package:opview/services/impl/cereal_adapter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'golden/mock_ui_state.dart';
 
 void _screen(WidgetTester tester, double w, double h) {
@@ -18,12 +20,17 @@ void _screen(WidgetTester tester, double w, double h) {
   addTearDown(tester.view.resetDevicePixelRatio);
 }
 
-AppSettings _detailed({ClockMode clock = ClockMode.off}) {
+AppSettings _detailed({SpeedLimitDisplay speedLimit = SpeedLimitDisplay.auto}) {
   final s = AppSettings();
   s.layout = OnroadLayout.detailed;
-  s.clockMode = clock;
+  s.speedLimitDisplay = speedLimit;
   return s;
 }
+
+/// the comma reports that speed limits are turned on
+UIState _withLimits(UIState s) => s
+  ..paramsSeen = true
+  ..speedLimitMode = 1;
 
 Widget _app(UIState state, AppSettings settings) =>
     MaterialApp(home: AugmentedRoadView(uiState: state, settings: settings));
@@ -46,10 +53,10 @@ void main() {
     });
 
     test('distance to the next speed limit', () {
-      expect(formatAheadDistance(644, false), '0.4 mi');
-      expect(formatAheadDistance(100, false), '350 ft');
-      expect(formatAheadDistance(1500, true), '1.5 km');
-      expect(formatAheadDistance(340, true), '350 m');
+      expect(formatNextLimitDistance(644, false), '0.4 mi');
+      expect(formatNextLimitDistance(100, false), '350 ft');
+      expect(formatNextLimitDistance(1500, true), '1.5 km');
+      expect(formatNextLimitDistance(340, true), '350 m');
     });
 
     test('time to the lead only while closing', () {
@@ -68,13 +75,13 @@ void main() {
   group('data', () {
     test('speed limit: current, else the last known, else none', () {
       final s = UIState();
-      expect(detailedSpeedLimit(s), isNull);
+      expect(speedLimitToShow(s), isNull);
       s.speedLimitLastValid = true;
       s.speedLimitLast = 20;
-      expect(detailedSpeedLimit(s), 20);
+      expect(speedLimitToShow(s), 20);
       s.speedLimitValid = true;
       s.speedLimit = 25;
-      expect(detailedSpeedLimit(s), 25);
+      expect(speedLimitToShow(s), 25);
     });
 
     test('new car, control and device fields are read', () {
@@ -152,7 +159,7 @@ void main() {
     testWidgets('draws every panel, on wide and short screens, without errors', (tester) async {
       for (final size in const [Size(1920, 1080), Size(1920, 720), Size(1280, 800)]) {
         _screen(tester, size.width, size.height);
-        await tester.pumpWidget(_app(createMockUIState(), _detailed(clock: ClockMode.h12)));
+        await tester.pumpWidget(_app(createMockUIState(), _detailed()));
         expect(find.byType(DetailedLayout), findsOneWidget);
         expect(find.text('STEERING'), findsOneWidget);
         expect(find.text('DRIVER'), findsOneWidget);
@@ -173,13 +180,13 @@ void main() {
 
     testWidgets('speed limit pill: limit, next limit, or dashes', (tester) async {
       _screen(tester, 1920, 1080);
-      final state = createMockUIState();
+      final state = _withLimits(createMockUIState());
       state.isMetric = false;
-      await tester.pumpWidget(_app(state, _detailed()));
-      final pill = find.byKey(const ValueKey('detailedSpeedLimit'));
+      await tester.pumpWidget(_app(state, _detailed(speedLimit: SpeedLimitDisplay.always)));
+      final pill = find.byKey(const ValueKey('topRowSpeedLimit'));
       expect(find.descendant(of: pill, matching: find.text('– –')), findsOneWidget);
-      expect(find.descendant(of: pill, matching: find.byKey(const ValueKey('detailedSpeedLimitOutline'))), findsOneWidget);
-      expect(find.byKey(const ValueKey('detailedNextLimit')), findsNothing);
+      expect(find.descendant(of: pill, matching: find.byKey(const ValueKey('topRowSpeedLimitOutline'))), findsOneWidget);
+      expect(find.byKey(const ValueKey('topRowNextLimit')), findsNothing);
 
       state
         ..speedLimitValid = true
@@ -189,11 +196,91 @@ void main() {
         ..speedLimitAheadDistance = 644;
       await tester.pumpWidget(_app(state, _detailed()));
       expect(find.descendant(of: pill, matching: find.text('45')), findsOneWidget);
-      expect(find.byKey(const ValueKey('detailedNextLimit')), findsOneWidget);
-      // set speed and speed limit are narrower than Enhanced's, and the same width
+      expect(find.byKey(const ValueKey('topRowNextLimit')), findsOneWidget);
+      // set speed and speed limit are the same width
       final unit = enhancedUnit(const Size(1920, 1080));
-      expect(tester.getSize(pill).width, closeTo(detailedSidePillWidth * unit, 0.01));
-      expect(tester.getSize(find.byKey(const ValueKey('detailedSetSpeed'))).width, closeTo(detailedSidePillWidth * unit, 0.01));
+      expect(tester.getSize(pill).width, closeTo(topRowSidePillWidth * unit, 0.01));
+      expect(tester.getSize(find.byKey(const ValueKey('topRowSetSpeed'))).width, closeTo(topRowSidePillWidth * unit, 0.01));
+    });
+
+    testWidgets('speed limit setting: Auto waits for a limit, Off never shows it', (tester) async {
+      _screen(tester, 1920, 1080);
+      final state = _withLimits(createMockUIState());
+      final pill = find.byKey(const ValueKey('topRowSpeedLimit'));
+      await tester.pumpWidget(_app(state, _detailed()));
+      expect(pill, findsNothing);
+
+      state.applyLongitudinalPlanSP({
+        'speedLimit': {
+          'resolver': {'speedLimit': 20.0, 'speedLimitValid': true},
+        },
+      });
+      await tester.pumpWidget(_app(state, _detailed()));
+      expect(pill, findsOneWidget);
+
+      // once seen it stays, even when the limit drops out
+      state.applyLongitudinalPlanSP({});
+      await tester.pumpWidget(_app(state, _detailed()));
+      expect(pill, findsOneWidget);
+
+      await tester.pumpWidget(_app(state, _detailed(speedLimit: SpeedLimitDisplay.off)));
+      expect(pill, findsNothing);
+    });
+
+    testWidgets('tapping a panel folds it to its title, at the same width', (tester) async {
+      _screen(tester, 1920, 1080);
+      SharedPreferences.setMockInitialValues({});
+      final settings = _detailed();
+      final state = createMockUIState();
+      await tester.pumpWidget(MaterialApp(
+        home: ListenableBuilder(
+          listenable: settings,
+          builder: (context, _) => AugmentedRoadView(uiState: state, settings: settings),
+        ),
+      ));
+      final panel = find.byKey(const ValueKey('detailedPanel_STEERING'));
+      final open = tester.getSize(panel);
+      expect(find.text('Mode'), findsOneWidget);
+      expect(find.text('▾'), findsNWidgets(4));
+
+      await tester.tap(find.text('STEERING'));
+      await tester.pumpAndSettle();
+      expect(settings.collapsedPanels, {'steering'});
+      expect(find.text('Mode'), findsNothing);
+      expect(find.descendant(of: panel, matching: find.text('▸')), findsOneWidget);
+      expect(tester.getSize(panel).width, closeTo(open.width, 0.01));
+      expect(tester.getSize(panel).height, lessThan(open.height / 3));
+      // the other panels are untouched
+      expect(find.text('Attention'), findsOneWidget);
+
+      await tester.tap(find.text('STEERING'));
+      await tester.pumpAndSettle();
+      expect(settings.collapsedPanels, isEmpty);
+      expect(find.text('Mode'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a folded panel hides its badge', (tester) async {
+      _screen(tester, 1920, 1080);
+      final settings = _detailed()..collapsedPanels.add('longitudinal');
+      await tester.pumpWidget(_app(createMockUIState(experimentalMode: true), settings));
+      expect(find.byKey(const ValueKey('detailedExperimental')), findsNothing);
+      expect(find.text('LONGITUDINAL'), findsOneWidget);
+    });
+
+    testWidgets('driver icon and confidence indicator, the same size, side by side', (tester) async {
+      _screen(tester, 1920, 1080);
+      final state = createMockUIState()..dmSeen = true;
+      await tester.pumpWidget(_app(state, _detailed()));
+      final unit = enhancedUnit(const Size(1920, 1080));
+      final driver = tester.getRect(find.byKey(const ValueKey('driverIcon')));
+      final conf = tester.getRect(find.byKey(const ValueKey('confidenceIndicator')));
+      expect(driver.width, closeTo(enhancedDriverIconSize * unit, 0.01));
+      expect(conf.size, driver.size);
+      expect(conf.top, driver.top);
+      expect(conf.left, closeTo(driver.right + 6 * unit, 0.01));
+      // clear of the panels below
+      expect(conf.bottom, lessThan(tester.getRect(find.byKey(const ValueKey('detailedPanel_STEERING'))).top));
     });
 
     testWidgets('lead panel: filled in with a lead, dashes while disengaged', (tester) async {

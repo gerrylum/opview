@@ -4,6 +4,7 @@
 
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
 
 const _panelColor = Color(0xF7161616);
@@ -113,8 +114,14 @@ class _SettingsBody extends StatelessWidget {
         _label('LAYOUT'),
         _choices<OnroadLayout>(OnroadLayout.values, settings.layout, onroadLayoutLabel, settings.setLayout),
 
-        _label('CLOCK'),
-        _choices<ClockMode>(clockModeChoices, settings.clockMode, clockModeLabel, settings.setClockMode),
+        _label('SPEED LIMIT'),
+        _choices<SpeedLimitDisplay>(
+          SpeedLimitDisplay.values,
+          settings.speedLimitDisplay,
+          speedLimitDisplayLabel,
+          settings.setSpeedLimitDisplay,
+        ),
+        _note('All layouts. Auto hides it until the comma has a speed limit (maps or the car)'),
 
         _label('COMMA DEVICE'),
         _deviceRow(),
@@ -134,7 +141,7 @@ class _SettingsBody extends StatelessWidget {
 
   Widget _label(String text) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(2 * unit, 10 * unit, 0, 5 * unit),
+      padding: EdgeInsets.fromLTRB(2 * unit, 9 * unit, 0, 4 * unit),
       child: Text(
         text,
         style: TextStyle(
@@ -145,6 +152,13 @@ class _SettingsBody extends StatelessWidget {
           height: 1.0,
         ),
       ),
+    );
+  }
+
+  Widget _note(String text) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(2 * unit, 4 * unit, 0, 0),
+      child: Text(text, style: TextStyle(color: const Color(0x80FFFFFF), fontSize: 7.5 * unit, height: 1.2)),
     );
   }
 

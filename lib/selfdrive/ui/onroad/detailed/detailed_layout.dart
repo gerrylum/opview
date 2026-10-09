@@ -2,11 +2,13 @@
 //
 // the Enhanced layout's camera, border, path, lead box, driver icon, torque bar,
 // blind spot glow and alerts, with as much of the comma's data as fits around them:
-//   - top row, centred on the speed: set speed | speed | speed limit (and the next one)
+//   - top row, centred on the speed: set speed | speed | speed limit (and the next one),
+//     shared with Enhanced (top_row.dart)
+//   - top left: driver monitoring and model confidence, as in Enhanced
 //   - top right: clock and device health (CPU temperature, memory, disk, Wi-Fi,
 //     power draw, calibration)
 //   - left: STEERING and DRIVER panels
-//   - right: LONGITUDINAL and LEAD panels
+//   - right: LONGITUDINAL and LEAD panels; tapping a panel folds it to its title
 //   - bottom: gear, turn signal, blind spot, lane line confidence, path curvature
 //
 // sizes are in comma four pixels, scaled by `unit`, as in the Enhanced layout.
@@ -21,6 +23,7 @@ import 'package:opview/selfdrive/ui/onroad/exp_button.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/throttled.dart';
+import 'package:opview/selfdrive/ui/onroad/top_row.dart';
 import 'package:opview/services/app_settings.dart';
 
 // -- sizes, in comma four pixels --
@@ -28,7 +31,6 @@ import 'package:opview/services/app_settings.dart';
 const detailedPanelWidth = 112.0;
 const detailedPanelTop = 82.0;        // below the driver icon
 const detailedCornerWidth = 82.0;     // clock and device health, top right
-const detailedSidePillWidth = 98.0;   // set speed and speed limit (Enhanced's are 116)
 const _rowHeight = 9.0;
 const _traceHeight = 20.0;
 
@@ -41,9 +43,6 @@ const _dimColor = Color(0xFF6E6E6E);
 const _green = Color(0xFF3ADB6D);
 const _orange = Color(0xFFFF9A3C);
 const _blue = Color(0xFF4D9DFF);
-const _limitPillColor = Color(0xDBCED0D2);  // soft grey-white
-const _limitTextColor = Color(0xFF1A1A1A);
-const _limitLabelColor = Color(0xFF555555);
 
 /// shown for a value that is not available right now
 const detailedNoValue = '–';
@@ -87,15 +86,6 @@ String formatGear(String gear) {
   }
 }
 
-/// distance to the next speed limit: "0.4 mi" / "650 ft", or "0.6 km" / "350 m"
-String formatAheadDistance(double metres, bool isMetric) {
-  if (isMetric) {
-    return metres >= 1000 ? '${(metres / 1000).toStringAsFixed(1)} km' : '${(metres / 50).round() * 50} m';
-  }
-  final miles = metres / 1609.344;
-  return miles >= 0.1 ? '${miles.toStringAsFixed(1)} mi' : '${(metres * 3.28084 / 50).round() * 50} ft';
-}
-
 /// seconds until the lead is reached at the current closing speed, or null when not closing
 double? timeToLead(double dRel, double vRel) => vRel < -0.1 ? dRel / -vRel : null;
 
@@ -115,27 +105,30 @@ int networkBars(String strength) {
   }
 }
 
-/// the speed limit to show, in m/s, or null when there is none
-double? detailedSpeedLimit(UIState st) {
-  if (st.speedLimitValid && st.speedLimit > 0) return st.speedLimit;
-  if (st.speedLimitLastValid && st.speedLimitLast > 0) return st.speedLimitLast;
-  return null;
-}
-
 // -- layout --
 
 class DetailedLayout extends StatelessWidget {
   final UIState uiState;
   final ClockMode clockMode;
+  final SpeedLimitDisplay speedLimitDisplay;
   final FrameTransform Function(double w, double h) frameFor;
   final Widget Function(FrameTransform frame) videoBuilder;
+
+  /// names of the panels folded to their title ([detailedPanelNames])
+  final Set<String> collapsedPanels;
+
+  /// called with a panel's name when it is tapped
+  final void Function(String name)? onTogglePanel;
 
   const DetailedLayout({
     super.key,
     required this.uiState,
     required this.clockMode,
+    this.speedLimitDisplay = SpeedLimitDisplay.auto,
     required this.frameFor,
     required this.videoBuilder,
+    this.collapsedPanels = const {},
+    this.onTogglePanel,
   });
 
   @override
@@ -215,7 +208,7 @@ class DetailedLayout extends StatelessWidget {
               left: 0,
               right: 0,
               height: enhancedSpeedPillHeight * unit,
-              child: DetailedTopRow(uiState: st, unit: unit),
+              child: SpeedTopRow(uiState: st, unit: unit, speedLimitDisplay: speedLimitDisplay),
             ),
             if (st.showRoadName)
               Positioned(
@@ -225,29 +218,8 @@ class DetailedLayout extends StatelessWidget {
                 child: Center(child: _roadName(st.roadName, unit, w)),
               ),
 
-            // shown whenever the car is on and the comma reports on the driver; dimmed and
-            // without the cone while not engaged or while camera monitoring is not running
-            if (st.started && st.dmSeen)
-              Positioned(
-                left: edge,
-                top: edge,
-                width: enhancedDriverIconSize * unit,
-                height: enhancedDriverIconSize * unit,
-                child: Opacity(
-                  opacity: enhancedDriverIconLive(st) ? 1.0 : 0.35,
-                  child: CustomPaint(
-                    painter: EnhancedDriverIconPainter(
-                      coneColor: enhancedDriverIconLive(st)
-                          ? enhancedDriverConeColor(awarenessFull: !st.dmAwarenessUnfull)
-                          : null,
-                      rotationDeg: st.dmRotationDeg,
-                    ),
-                    child: Center(
-                      child: Icon(Icons.person, color: Colors.white, size: enhancedDriverIconSize * unit * 0.62),
-                    ),
-                  ),
-                ),
-              ),
+            // driver monitoring and model confidence, top left
+            ...enhancedDriverAndConfidence(st, unit, edge),
 
             // clock and device health, top right
             Positioned(
@@ -270,8 +242,8 @@ class DetailedLayout extends StatelessWidget {
               child: ThrottledByVersion(
                 state: st,
                 builder: (_) => column([
-                  DetailedSteeringPanel(uiState: st, unit: unit),
-                  DetailedDriverPanel(uiState: st, unit: unit),
+                  DetailedSteeringPanel(uiState: st, unit: unit, collapsed: collapsedPanels.contains('steering'), onTap: _toggle('steering')),
+                  DetailedDriverPanel(uiState: st, unit: unit, collapsed: collapsedPanels.contains('driver'), onTap: _toggle('driver')),
                 ]),
               ),
             ),
@@ -283,8 +255,8 @@ class DetailedLayout extends StatelessWidget {
               child: ThrottledByVersion(
                 state: st,
                 builder: (_) => column([
-                  DetailedLongitudinalPanel(uiState: st, unit: unit),
-                  DetailedLeadPanel(uiState: st, unit: unit),
+                  DetailedLongitudinalPanel(uiState: st, unit: unit, collapsed: collapsedPanels.contains('longitudinal'), onTap: _toggle('longitudinal')),
+                  DetailedLeadPanel(uiState: st, unit: unit, collapsed: collapsedPanels.contains('lead'), onTap: _toggle('lead')),
                 ]),
               ),
             ),
@@ -312,6 +284,11 @@ class DetailedLayout extends StatelessWidget {
         ),
       );
     });
+  }
+
+  VoidCallback? _toggle(String name) {
+    final f = onTogglePanel;
+    return f == null ? null : () => f(name);
   }
 
   Widget _glow(double unit, {required bool left}) {
@@ -356,250 +333,116 @@ Widget _roadName(String name, double unit, double screenW) {
   );
 }
 
-// -- top row --
-
-/// set speed | speed | speed limit, with the speed centred
-class DetailedTopRow extends StatelessWidget {
-  final UIState uiState;
-  final double unit;
-
-  const DetailedTopRow({super.key, required this.uiState, required this.unit});
-
-  @override
-  Widget build(BuildContext context) {
-    final st = uiState;
-    final gap = SizedBox(width: 8 * unit);
-    return Row(
-      children: [
-        Expanded(
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: st.isCruiseAvailable ? _setSpeed() : const SizedBox.shrink(),
-          ),
-        ),
-        gap,
-        _speed(),
-        gap,
-        Expanded(child: Align(alignment: Alignment.centerLeft, child: _limit())),
-      ],
-    );
-  }
-
-  Widget _box({Key? key, Color color = const Color(0xB3141414), required Widget child}) {
-    return Container(
-      key: key,
-      width: detailedSidePillWidth * unit,
-      height: enhancedSidePillHeight * unit,
-      padding: EdgeInsets.symmetric(horizontal: 10 * unit),
-      alignment: Alignment.center,
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(12 * unit)),
-      child: FittedBox(fit: BoxFit.scaleDown, child: child),
-    );
-  }
-
-  Widget _speed() {
-    return Container(
-      height: enhancedSpeedPillHeight * unit,
-      constraints: BoxConstraints(minWidth: 74 * unit),
-      padding: EdgeInsets.symmetric(horizontal: 12 * unit),
-      decoration: BoxDecoration(color: const Color(0xB3141414), borderRadius: BorderRadius.circular(12 * unit)),
-      child: Center(
-        widthFactor: 1,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '${uiState.displaySpeed.round()}',
-              style: TextStyle(color: HudColors.white, fontSize: 33 * unit, fontWeight: FontWeight.bold, height: 0.95),
-            ),
-            Text(
-              uiState.isMetric ? 'km/h' : 'mph',
-              style: TextStyle(color: HudColors.grey, fontSize: 11 * unit, fontWeight: FontWeight.w600, height: 1.0),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _setSpeed() {
-    final st = uiState;
-    Color maxColor = HudColors.grey;
-    Color speedColor = HudColors.grey;
-    if (st.isCruiseSet) {
-      speedColor = HudColors.white;
-      if (st.status == UIStatus.engaged) {
-        maxColor = HudColors.engaged;
-      } else if (st.status == UIStatus.disengaged) {
-        maxColor = HudColors.disengaged;
-      } else if (st.status == UIStatus.override_) {
-        maxColor = HudColors.override_;
-      }
-    }
-    return _box(
-      key: const ValueKey('detailedSetSpeed'),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.baseline,
-        textBaseline: TextBaseline.alphabetic,
-        children: [
-          Text('MAX', style: TextStyle(color: maxColor, fontSize: 11 * unit, fontWeight: FontWeight.w600, height: 1.0)),
-          SizedBox(width: 5 * unit),
-          Text(
-            st.isCruiseSet ? '${st.setSpeed.round()}' : detailedNoValue,
-            style: TextStyle(color: speedColor, fontSize: 24 * unit, fontWeight: FontWeight.bold, height: 1.0),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// the mirror of the set speed pill, light like a road sign: the limit then a small
-  /// LIMIT, and the next limit underneath when one is coming up
-  Widget _limit() {
-    final st = uiState;
-    final limit = detailedSpeedLimit(st);
-    final hasNext = limit != null && st.speedLimitAheadValid && st.speedLimitAhead > 0 && st.speedLimitAheadDistance > 0;
-    final labelStyle = TextStyle(color: _limitLabelColor, fontSize: 10 * unit, fontWeight: FontWeight.w600, height: 1.0);
-    final pill = _box(
-      color: _limitPillColor,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                limit != null ? '${(limit * st.speedConv).round()}' : '– –',
-                style: TextStyle(color: _limitTextColor, fontSize: (hasNext ? 22 : 24) * unit, fontWeight: FontWeight.bold, height: 1.0),
-              ),
-              SizedBox(width: 5 * unit),
-              Text('LIMIT', style: labelStyle),
-            ],
-          ),
-          if (hasNext) ...[
-            SizedBox(height: 2.5 * unit),
-            Text.rich(
-              TextSpan(children: [
-                const TextSpan(text: 'next '),
-                TextSpan(
-                  text: '${(st.speedLimitAhead * st.speedConv).round()}',
-                  style: const TextStyle(color: _limitTextColor, fontWeight: FontWeight.bold),
-                ),
-                TextSpan(text: ' in ${formatAheadDistance(st.speedLimitAheadDistance, st.isMetric)}'),
-              ]),
-              key: const ValueKey('detailedNextLimit'),
-              style: TextStyle(color: _limitLabelColor, fontSize: 5.6 * unit, fontWeight: FontWeight.w600, height: 1.0),
-            ),
-          ],
-        ],
-      ),
-    );
-    // a thin dark line just inside the edge, like the border of a speed limit sign
-    return Stack(
-      key: const ValueKey('detailedSpeedLimit'),
-      children: [
-        pill,
-        Positioned.fill(
-          child: IgnorePointer(
-            child: Padding(
-              padding: EdgeInsets.all(2.5 * unit),
-              child: DecoratedBox(
-                key: const ValueKey('detailedSpeedLimitOutline'),
-                decoration: BoxDecoration(
-                  border: Border.all(color: _limitTextColor, width: 1.1 * unit),
-                  borderRadius: BorderRadius.circular(9.5 * unit),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 // -- panels --
 
-/// dark card with a title, an optional badge, and rows of label and value
+/// names of the side panels, as stored in the settings when folded
+const detailedPanelNames = ['steering', 'driver', 'longitudinal', 'lead'];
+
+/// dark card with a title, an optional badge, and rows of label and value; tapping it
+/// folds it down to the title (same width) and back
 class _Panel extends StatelessWidget {
   final double unit;
   final String title;
   final Widget? badge;
   final List<(String, String, Color)> rows;
   final Widget? footer;
+  final bool collapsed;
+  final VoidCallback? onTap;
 
-  const _Panel({required this.unit, required this.title, this.badge, required this.rows, this.footer});
+  const _Panel({
+    required this.unit,
+    required this.title,
+    this.badge,
+    required this.rows,
+    this.footer,
+    this.collapsed = false,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final titleStyle = TextStyle(
+      color: const Color(0xFFCFCFCF),
+      fontSize: 5.6 * unit,
+      fontWeight: FontWeight.bold,
+      letterSpacing: 0.6 * unit,
+      height: 1.0,
+    );
+    final titleRow = SizedBox(
+      height: 8 * unit,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          _shrink(
+            alignment: Alignment.centerLeft,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(title, style: titleStyle),
+                SizedBox(width: 2 * unit),
+                Text(collapsed ? '▸' : '▾', key: ValueKey('detailedPanelArrow_$title'), style: titleStyle),
+              ],
+            ),
+          ),
+          if (badge != null && !collapsed) ...[
+            SizedBox(width: 3 * unit),
+            _shrink(alignment: Alignment.centerRight, badge!),
+          ],
+        ],
+      ),
+    );
+    final card = Container(
+      key: ValueKey('detailedPanel_$title'),
       width: detailedPanelWidth * unit,
-      padding: EdgeInsets.symmetric(horizontal: 6 * unit, vertical: 4.5 * unit),
+      padding: collapsed
+          ? EdgeInsets.symmetric(horizontal: 6 * unit, vertical: 3.5 * unit)
+          : EdgeInsets.symmetric(horizontal: 6 * unit, vertical: 4.5 * unit),
       decoration: BoxDecoration(color: _panelColor, borderRadius: BorderRadius.circular(7 * unit)),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SizedBox(
-            height: 8 * unit,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _shrink(alignment: Alignment.centerLeft, Text(
-                  title,
-                  style: TextStyle(
-                    color: const Color(0xFFCFCFCF),
-                    fontSize: 5.6 * unit,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.6 * unit,
-                    height: 1.0,
-                  ),
-                )),
-                if (badge != null) ...[
-                  SizedBox(width: 3 * unit),
-                  _shrink(alignment: Alignment.centerRight, badge!),
-                ],
-              ],
-            ),
-          ),
-          SizedBox(height: 2 * unit),
-          for (final (label, value, color) in rows)
-            SizedBox(
-              height: _rowHeight * unit,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _shrink(
-                    alignment: Alignment.centerLeft,
-                    Text(label, style: TextStyle(color: _labelColor, fontSize: 5.6 * unit, fontWeight: FontWeight.w600, height: 1.0)),
-                  ),
-                  SizedBox(width: 3 * unit),
-                  Flexible(
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerRight,
-                      child: Text(
-                        value,
-                        style: TextStyle(
-                          color: color,
-                          fontSize: 7 * unit,
-                          fontWeight: FontWeight.bold,
-                          height: 1.0,
-                          fontFeatures: const [FontFeature.tabularFigures()],
+          titleRow,
+          if (!collapsed) ...[
+            SizedBox(height: 2 * unit),
+            for (final (label, value, color) in rows)
+              SizedBox(
+                height: _rowHeight * unit,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _shrink(
+                      alignment: Alignment.centerLeft,
+                      Text(label, style: TextStyle(color: _labelColor, fontSize: 5.6 * unit, fontWeight: FontWeight.w600, height: 1.0)),
+                    ),
+                    SizedBox(width: 3 * unit),
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          value,
+                          style: TextStyle(
+                            color: color,
+                            fontSize: 7 * unit,
+                            fontWeight: FontWeight.bold,
+                            height: 1.0,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          if (footer != null) footer!,
+            if (footer != null) footer!,
+          ],
         ],
       ),
     );
+    if (onTap == null) return card;
+    // only a tap: a long press still reaches the settings
+    return GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTap, child: card);
   }
 }
 
@@ -748,8 +591,10 @@ class DetailedTracePainter extends CustomPainter {
 class DetailedSteeringPanel extends StatelessWidget {
   final UIState uiState;
   final double unit;
+  final bool collapsed;
+  final VoidCallback? onTap;
 
-  const DetailedSteeringPanel({super.key, required this.uiState, required this.unit});
+  const DetailedSteeringPanel({super.key, required this.uiState, required this.unit, this.collapsed = false, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -762,6 +607,8 @@ class DetailedSteeringPanel extends StatelessWidget {
     final on = st.latActive;
     return _Panel(
       unit: unit,
+      collapsed: collapsed,
+      onTap: onTap,
       title: 'STEERING',
       badge: on
           ? (st.lateralSaturated
@@ -795,8 +642,10 @@ class DetailedSteeringPanel extends StatelessWidget {
 class DetailedDriverPanel extends StatelessWidget {
   final UIState uiState;
   final double unit;
+  final bool collapsed;
+  final VoidCallback? onTap;
 
-  const DetailedDriverPanel({super.key, required this.uiState, required this.unit});
+  const DetailedDriverPanel({super.key, required this.uiState, required this.unit, this.collapsed = false, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -805,6 +654,8 @@ class DetailedDriverPanel extends StatelessWidget {
     final attention = st.dmAwarenessPercent.round();
     return _Panel(
       unit: unit,
+      collapsed: collapsed,
+      onTap: onTap,
       title: 'DRIVER',
       rows: [
         ('Face', !seen ? detailedNoValue : (st.dmFaceDetected ? 'detected' : 'not seen'),
@@ -819,8 +670,10 @@ class DetailedDriverPanel extends StatelessWidget {
 class DetailedLongitudinalPanel extends StatelessWidget {
   final UIState uiState;
   final double unit;
+  final bool collapsed;
+  final VoidCallback? onTap;
 
-  const DetailedLongitudinalPanel({super.key, required this.uiState, required this.unit});
+  const DetailedLongitudinalPanel({super.key, required this.uiState, required this.unit, this.collapsed = false, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -828,6 +681,8 @@ class DetailedLongitudinalPanel extends StatelessWidget {
     final pedals = [if (st.gasPressed) 'throttle', if (st.brakePressed) 'brake'];
     return _Panel(
       unit: unit,
+      collapsed: collapsed,
+      onTap: onTap,
       title: 'LONGITUDINAL',
       badge: st.experimentalMode
           ? detailedBadge(unit, 'EXPERIMENTAL', _orange, key: const ValueKey('detailedExperimental'))
@@ -857,8 +712,10 @@ class DetailedLongitudinalPanel extends StatelessWidget {
 class DetailedLeadPanel extends StatelessWidget {
   final UIState uiState;
   final double unit;
+  final bool collapsed;
+  final VoidCallback? onTap;
 
-  const DetailedLeadPanel({super.key, required this.uiState, required this.unit});
+  const DetailedLeadPanel({super.key, required this.uiState, required this.unit, this.collapsed = false, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -867,7 +724,7 @@ class DetailedLeadPanel extends StatelessWidget {
     final lead = shown ? st.activeLead : null;
     if (lead == null) {
       const dash = enhancedNoLeadValue, c = Color(0xFF8A8A8A);
-      return _Panel(unit: unit, title: 'LEAD', rows: const [
+      return _Panel(unit: unit, collapsed: collapsed, onTap: onTap, title: 'LEAD', rows: const [
         ('Distance', dash, c),
         ('Gap', dash, c),
         ('Closing', dash, c),
@@ -890,6 +747,8 @@ class DetailedLeadPanel extends StatelessWidget {
     final radar = st.leadRadarRecent;
     return _Panel(
       unit: unit,
+      collapsed: collapsed,
+      onTap: onTap,
       title: 'LEAD',
       badge: detailedBadge(unit, radar ? 'RADAR + VISION' : 'VISION', _blue),
       rows: [

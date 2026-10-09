@@ -42,7 +42,15 @@ class HudRenderer extends StatelessWidget {
   final UIState uiState;
   final double scale;
 
-  const HudRenderer({super.key, required this.uiState, required this.scale});
+  /// the app's speed limit setting, for the speed limit sign
+  final SpeedLimitDisplay speedLimitDisplay;
+
+  const HudRenderer({
+    super.key,
+    required this.uiState,
+    required this.scale,
+    this.speedLimitDisplay = SpeedLimitDisplay.auto,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -54,7 +62,7 @@ class HudRenderer extends StatelessWidget {
         ExpButton(uiState: uiState, scale: scale),
         // sunnypilot extras (sunnypilot/onroad/hud_renderer.py render order)
         RoadNameRenderer(uiState: uiState, scale: scale),
-        Positioned.fill(child: SpeedLimitRenderer(uiState: uiState, scale: scale)),
+        Positioned.fill(child: SpeedLimitRenderer(uiState: uiState, scale: scale, display: speedLimitDisplay)),
         Positioned.fill(child: TurnSignalRenderer(uiState: uiState, scale: scale)),
       ],
     );
