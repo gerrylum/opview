@@ -43,8 +43,11 @@ class WebRTCClient {
     // create peer connection — no ICE servers needed for LAN
     _pc = await createPeerConnection({'iceServers': []});
 
-    // data channel for cereal messages
-    _dataChannel = await _pc!.createDataChannel('data', RTCDataChannelInit());
+    // data channel for cereal messages. Unordered and never re-sent: the default
+    // (ordered, reliable) holds every later message back behind one lost Wi-Fi
+    // packet until it is re-sent, so the display froze and then caught up in a
+    // burst. A late telemetry message is useless anyway; the next one replaces it
+    _dataChannel = await _pc!.createDataChannel('data', dataChannelConfig());
     _setupDataChannel(_dataChannel!);
 
     // also handle server-created data channel (fallback)
@@ -169,3 +172,8 @@ String preferH264(String sdp) {
 
   return lines.join('\r\n');
 }
+
+/// how the telemetry data channel is opened: unordered, and a lost message is dropped
+RTCDataChannelInit dataChannelConfig() => RTCDataChannelInit()
+  ..ordered = false
+  ..maxRetransmits = 0;

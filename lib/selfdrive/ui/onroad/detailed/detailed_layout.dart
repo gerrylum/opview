@@ -20,6 +20,7 @@ import 'package:opview/selfdrive/ui/onroad/enhanced/enhanced_layout.dart';
 import 'package:opview/selfdrive/ui/onroad/exp_button.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
+import 'package:opview/selfdrive/ui/onroad/throttled.dart';
 import 'package:opview/services/app_settings.dart';
 
 // -- sizes, in comma four pixels --
@@ -250,7 +251,11 @@ class DetailedLayout extends StatelessWidget {
               right: edge,
               top: edge,
               width: detailedCornerWidth * unit,
-              child: DetailedDeviceGrid(uiState: st, unit: unit, clockMode: clockMode),
+              // readouts refresh about 5 times a second, the camera and path 20
+              child: ThrottledByVersion(
+                state: st,
+                builder: (_) => DetailedDeviceGrid(uiState: st, unit: unit, clockMode: clockMode),
+              ),
             ),
 
             // side panels
@@ -259,20 +264,26 @@ class DetailedLayout extends StatelessWidget {
               top: panelTop,
               bottom: edge,
               width: detailedPanelWidth * unit,
-              child: column([
-                DetailedSteeringPanel(uiState: st, unit: unit),
-                DetailedDriverPanel(uiState: st, unit: unit),
-              ]),
+              child: ThrottledByVersion(
+                state: st,
+                builder: (_) => column([
+                  DetailedSteeringPanel(uiState: st, unit: unit),
+                  DetailedDriverPanel(uiState: st, unit: unit),
+                ]),
+              ),
             ),
             Positioned(
               right: edge,
               top: panelTop,
               bottom: edge,
               width: detailedPanelWidth * unit,
-              child: column([
-                DetailedLongitudinalPanel(uiState: st, unit: unit),
-                DetailedLeadPanel(uiState: st, unit: unit),
-              ]),
+              child: ThrottledByVersion(
+                state: st,
+                builder: (_) => column([
+                  DetailedLongitudinalPanel(uiState: st, unit: unit),
+                  DetailedLeadPanel(uiState: st, unit: unit),
+                ]),
+              ),
             ),
 
             // car and model state, bottom centre
@@ -280,7 +291,10 @@ class DetailedLayout extends StatelessWidget {
               left: edge + (detailedPanelWidth + 8) * unit,
               right: edge + (detailedPanelWidth + 8) * unit,
               bottom: 6.5 * unit,
-              child: DetailedStatusStrip(uiState: st, unit: unit),
+              child: ThrottledByVersion(
+                state: st,
+                builder: (_) => DetailedStatusStrip(uiState: st, unit: unit),
+              ),
             ),
 
             EnhancedAlert(uiState: st, unit: unit),

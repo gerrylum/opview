@@ -25,6 +25,7 @@ import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/exp_button.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
+import 'package:opview/selfdrive/ui/onroad/throttled.dart';
 import 'package:opview/services/app_settings.dart';
 
 // -- sizes, in comma four pixels --
@@ -260,14 +261,14 @@ class EnhancedLayout extends StatelessWidget {
             Positioned(
               left: edge,
               bottom: edge,
-              child: EnhancedSteeringPills(uiState: st, unit: unit),
+              child: ThrottledByVersion(state: st, builder: (_) => EnhancedSteeringPills(uiState: st, unit: unit)),
             ),
 
             // lead car readout, bottom right
             Positioned(
               right: edge,
               bottom: edge,
-              child: EnhancedLeadPills(uiState: st, unit: unit),
+              child: ThrottledByVersion(state: st, builder: (_) => EnhancedLeadPills(uiState: st, unit: unit)),
             ),
 
             EnhancedAlert(uiState: st, unit: unit),
