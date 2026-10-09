@@ -825,7 +825,7 @@ class DetailedLongitudinalPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final st = uiState;
-    final pedals = [if (st.gasPressed) 'gas', if (st.brakePressed) 'brake'];
+    final pedals = [if (st.gasPressed) 'throttle', if (st.brakePressed) 'brake'];
     return _Panel(
       unit: unit,
       title: 'LONGITUDINAL',
@@ -837,7 +837,7 @@ class DetailedLongitudinalPanel extends StatelessWidget {
         ('Personality', formatPersonality(st.personality), Colors.white),
         ('Accel cmd', st.longActive ? formatAccel(st.accelCommand) : detailedNoValue, Colors.white),
         ('Accel actual', formatAccel(st.aEgo), Colors.white),
-        ('Gas / brake', pedals.isEmpty ? '— / —' : pedals.join(' + '), pedals.isEmpty ? _dimColor : _orange),
+        ('Throttle / brake', pedals.isEmpty ? '— / —' : pedals.join(' + '), pedals.isEmpty ? _dimColor : _orange),
       ],
       footer: _trace(
         unit,
