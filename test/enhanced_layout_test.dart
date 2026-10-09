@@ -397,7 +397,8 @@ void main() {
       final max = tester.getRect(find.byKey(const ValueKey('topRowSetSpeed')));
       final limit = tester.getRect(find.byKey(const ValueKey('topRowSpeedLimit')));
       final speed = tester.getRect(find.ancestor(of: find.text('65'), matching: find.byType(Container)).first);
-      expect(max.size, limit.size);
+      expect(limit.width, closeTo(max.width, 0.01));
+      expect(limit.height, closeTo(max.height, 0.01));
       expect(max.width, closeTo(topRowSidePillWidth * _unit, 0.01));
       expect(max.height, closeTo(topRowSidePillHeight * _unit, 0.01));
       // mirrored about the centre of the screen, tops level with the speed pill
@@ -562,7 +563,8 @@ void main() {
       final driver = tester.getRect(find.byKey(const ValueKey('driverIcon')));
       final conf = tester.getRect(ind);
       expect(driver.width, closeTo(enhancedDriverIconSize * _unit, 0.01));
-      expect(conf.size, driver.size);
+      expect(conf.width, closeTo(driver.width, 0.01));
+      expect(conf.height, closeTo(driver.height, 0.01));
       expect(conf.top, closeTo(_edge, 0.01));
       expect(conf.left, closeTo(driver.right + 6 * _unit, 0.01));
 

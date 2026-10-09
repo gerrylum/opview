@@ -276,8 +276,9 @@ void main() {
       final driver = tester.getRect(find.byKey(const ValueKey('driverIcon')));
       final conf = tester.getRect(find.byKey(const ValueKey('confidenceIndicator')));
       expect(driver.width, closeTo(enhancedDriverIconSize * unit, 0.01));
-      expect(conf.size, driver.size);
-      expect(conf.top, driver.top);
+      expect(conf.width, closeTo(driver.width, 0.01));
+      expect(conf.height, closeTo(driver.height, 0.01));
+      expect(conf.top, closeTo(driver.top, 0.01));
       expect(conf.left, closeTo(driver.right + 6 * unit, 0.01));
       // clear of the panels below
       expect(conf.bottom, lessThan(tester.getRect(find.byKey(const ValueKey('detailedPanel_STEERING'))).top));

@@ -274,10 +274,14 @@ class DetailedLayout extends StatelessWidget {
 
             EnhancedAlert(uiState: st, unit: unit),
 
-            DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: radius,
-                border: Border.all(color: enhancedBorderColor(st.status), width: enhancedBorderWidth * unit),
+            // border in the engagement colour, drawn on top but letting taps
+            // through to the panels underneath
+            IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: radius,
+                  border: Border.all(color: enhancedBorderColor(st.status), width: enhancedBorderWidth * unit),
+                ),
               ),
             ),
           ],
