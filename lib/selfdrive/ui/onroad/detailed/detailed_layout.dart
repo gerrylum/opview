@@ -147,7 +147,6 @@ class DetailedLayout extends StatelessWidget {
       final radius = BorderRadius.circular(enhancedCornerRadius * unit);
       final edge = (enhancedBorderWidth + enhancedMargin) * unit;
       final frame = frameFor(w, h);
-      final active = st.status != UIStatus.disengaged;
       final hudBottom = edge + (enhancedSpeedPillHeight + 6 + 24) * unit;
       final panelTop = (enhancedBorderWidth + detailedPanelTop) * unit;
 
@@ -226,7 +225,8 @@ class DetailedLayout extends StatelessWidget {
                 child: Center(child: _roadName(st.roadName, unit, w)),
               ),
 
-            if (active && st.dmSeen)
+            // shown whenever the car is on and the comma reports on the driver, engaged or not
+            if (st.started && st.dmSeen)
               Positioned(
                 left: edge,
                 top: edge,

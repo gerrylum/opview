@@ -133,7 +133,6 @@ class EnhancedLayout extends StatelessWidget {
       final radius = BorderRadius.circular(enhancedCornerRadius * unit);
       final edge = (enhancedBorderWidth + enhancedMargin) * unit;  // screen edge to corner elements
       final frame = frameFor(w, h);
-      final active = st.status != UIStatus.disengaged;
 
       // bottom of the road name pill: the lead's distance tag stays below it
       final hudBottom = edge + (enhancedSpeedPillHeight + 6 + 24) * unit;
@@ -237,7 +236,8 @@ class EnhancedLayout extends StatelessWidget {
 
             // driver monitoring, top left: the cone points where the driver's head is
             // turned; dimmed, without a cone, when camera monitoring is not running
-            if (active && st.dmSeen)
+            // shown whenever the car is on and the comma reports on the driver, engaged or not
+            if (st.started && st.dmSeen)
               Positioned(
                 left: edge,
                 top: edge,

@@ -442,7 +442,7 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('driver monitoring icon appears once its data arrives, while active', (tester) async {
+    testWidgets('driver monitoring icon appears once its data arrives', (tester) async {
       _screen(tester, 1920, 1080);
       final state = createMockUIState();
       await tester.pumpWidget(_app(state, _enhanced()));
@@ -454,13 +454,13 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('disengaged: no driver icon, still draws', (tester) async {
+    testWidgets('disengaged: the driver icon stays, and it still draws', (tester) async {
       _screen(tester, 1920, 1080);
       final state = createMockUIState(engaged: false, vCruiseCluster: 0);
       state.applyDriverMonitoringState({'faceDetected': true});
       await tester.pumpWidget(_app(state, _enhanced()));
       expect(find.byType(EnhancedLayout), findsOneWidget);
-      expect(find.byIcon(Icons.person), findsNothing);
+      expect(find.byIcon(Icons.person), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });
