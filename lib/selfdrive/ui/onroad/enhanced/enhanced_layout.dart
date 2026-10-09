@@ -89,6 +89,11 @@ Color enhancedDriverConeColor({required bool awarenessFull}) {
   return awarenessFull ? const Color(0xFF00FF40) : const Color(0xFFFF7300);
 }
 
+/// the driver icon shows its cone (head direction, attention) only while openpilot is
+/// engaged in some form and camera monitoring is running; otherwise it is an empty,
+/// dimmed placeholder
+bool enhancedDriverIconLive(UIState st) => st.status != UIStatus.disengaged && st.dmActive;
+
 /// alert background: dark for a notice, orange when a response is needed, red when critical
 Color enhancedAlertColor(int alertStatus, {required bool fullScreen}) {
   if (alertStatus == _alertStatusCritical) return const Color(0xF1C92231);
@@ -236,7 +241,8 @@ class EnhancedLayout extends StatelessWidget {
 
             // driver monitoring, top left: the cone points where the driver's head is
             // turned; dimmed, without a cone, when camera monitoring is not running
-            // shown whenever the car is on and the comma reports on the driver, engaged or not
+            // shown whenever the car is on and the comma reports on the driver; dimmed and
+            // without the cone while not engaged or while camera monitoring is not running
             if (st.started && st.dmSeen)
               Positioned(
                 left: edge,
@@ -244,10 +250,12 @@ class EnhancedLayout extends StatelessWidget {
                 width: enhancedDriverIconSize * unit,
                 height: enhancedDriverIconSize * unit,
                 child: Opacity(
-                  opacity: st.dmActive ? 1.0 : 0.35,
+                  opacity: enhancedDriverIconLive(st) ? 1.0 : 0.35,
                   child: CustomPaint(
                     painter: EnhancedDriverIconPainter(
-                      coneColor: st.dmActive ? enhancedDriverConeColor(awarenessFull: !st.dmAwarenessUnfull) : null,
+                      coneColor: enhancedDriverIconLive(st)
+                          ? enhancedDriverConeColor(awarenessFull: !st.dmAwarenessUnfull)
+                          : null,
                       rotationDeg: st.dmRotationDeg,
                     ),
                     child: Center(

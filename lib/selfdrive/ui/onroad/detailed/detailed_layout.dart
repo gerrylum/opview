@@ -225,7 +225,8 @@ class DetailedLayout extends StatelessWidget {
                 child: Center(child: _roadName(st.roadName, unit, w)),
               ),
 
-            // shown whenever the car is on and the comma reports on the driver, engaged or not
+            // shown whenever the car is on and the comma reports on the driver; dimmed and
+            // without the cone while not engaged or while camera monitoring is not running
             if (st.started && st.dmSeen)
               Positioned(
                 left: edge,
@@ -233,10 +234,12 @@ class DetailedLayout extends StatelessWidget {
                 width: enhancedDriverIconSize * unit,
                 height: enhancedDriverIconSize * unit,
                 child: Opacity(
-                  opacity: st.dmActive ? 1.0 : 0.35,
+                  opacity: enhancedDriverIconLive(st) ? 1.0 : 0.35,
                   child: CustomPaint(
                     painter: EnhancedDriverIconPainter(
-                      coneColor: st.dmActive ? enhancedDriverConeColor(awarenessFull: !st.dmAwarenessUnfull) : null,
+                      coneColor: enhancedDriverIconLive(st)
+                          ? enhancedDriverConeColor(awarenessFull: !st.dmAwarenessUnfull)
+                          : null,
                       rotationDeg: st.dmRotationDeg,
                     ),
                     child: Center(

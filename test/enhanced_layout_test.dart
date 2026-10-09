@@ -454,13 +454,26 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('disengaged: the driver icon stays, and it still draws', (tester) async {
+    test('driver icon is live only while engaged and camera monitoring runs', () {
+      final s = createMockUIState();
+      s.applyDriverMonitoringState({'activePolicy': 'vision', 'visionPolicyState': {'faceDetected': true}});
+      expect(enhancedDriverIconLive(s), true);
+      s.status = UIStatus.disengaged;
+      expect(enhancedDriverIconLive(s), false);
+      s.status = UIStatus.latOnly;
+      s.applyDriverMonitoringState({'activePolicy': 'wheelTouch', 'visionPolicyState': {'faceDetected': false}});
+      expect(enhancedDriverIconLive(s), false);
+    });
+
+    testWidgets('disengaged: the driver icon stays, dimmed and empty, and it still draws', (tester) async {
       _screen(tester, 1920, 1080);
       final state = createMockUIState(engaged: false, vCruiseCluster: 0);
       state.applyDriverMonitoringState({'faceDetected': true});
       await tester.pumpWidget(_app(state, _enhanced()));
       expect(find.byType(EnhancedLayout), findsOneWidget);
       expect(find.byIcon(Icons.person), findsOneWidget);
+      final icon = tester.widget<Opacity>(find.ancestor(of: find.byIcon(Icons.person), matching: find.byType(Opacity)).first);
+      expect(icon.opacity, lessThan(1.0));
       expect(tester.takeException(), isNull);
     });
   });
