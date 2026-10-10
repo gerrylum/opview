@@ -170,6 +170,16 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
               ),
               ],
 
+              // connected, but the telemetry has stopped: the overlay is old until it
+              // comes back or the session is rebuilt (connection_manager.dart)
+              if (widget.uiState.isConnected && widget.uiState.dataStale)
+                Positioned(
+                  top: screenH * 0.36,
+                  left: 0,
+                  right: 0,
+                  child: Center(child: DataPausedTag(scale: scale)),
+                ),
+
               // layer 3: connecting overlay with rolling status log
               if (!widget.uiState.isConnected)
                 Container(
@@ -440,4 +450,41 @@ class _EngagementBorderPainter extends CustomPainter {
   @override
   bool shouldRepaint(_EngagementBorderPainter old) =>
     old.status != status || old.borderSize != borderSize;
+}
+
+/// small tag over the road while the telemetry is paused
+class DataPausedTag extends StatelessWidget {
+  final double scale;
+
+  const DataPausedTag({super.key, required this.scale});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        key: const ValueKey('dataPausedTag'),
+        padding: EdgeInsets.symmetric(horizontal: 26 * scale, vertical: 14 * scale),
+        decoration: BoxDecoration(
+          color: const Color(0xD9141414),
+          borderRadius: BorderRadius.circular(40 * scale),
+          border: Border.all(color: const Color(0x80FF9A3C), width: 2 * scale),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 16 * scale,
+              height: 16 * scale,
+              decoration: const BoxDecoration(color: Color(0xFFFF9A3C), shape: BoxShape.circle),
+            ),
+            SizedBox(width: 14 * scale),
+            Text(
+              'Data paused \u00B7 reconnecting',
+              style: TextStyle(color: Colors.white, fontSize: 30 * scale, fontWeight: FontWeight.w600, height: 1.0),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

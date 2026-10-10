@@ -15,6 +15,7 @@ import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/discovery.dart';
 import 'package:opview/services/transport.dart';
 import 'package:opview/services/adapter.dart';
+import 'package:opview/services/data_watchdog.dart';
 import 'package:opview/services/impl/mdns_discovery.dart';
 import 'package:opview/services/impl/webrtc_transport.dart';
 import 'package:opview/services/impl/cereal_adapter.dart';
@@ -74,6 +75,10 @@ class ConnectionManager {
   int _connectEpoch = 0;       // invalidate stale in-flight connects
   int _retryCount = 0;
   static const _maxRetries = 3;
+
+  // telemetry that stops while the video keeps playing: flag it, then rebuild
+  final _watchdog = DataWatchdog();
+  Timer? _watchdogTimer;
   String _streamType = 'road';
 
   /// update status line shown on the connecting overlay
@@ -172,6 +177,7 @@ class ConnectionManager {
       _retryCount = 0;
       _listenData();
       _listenState();
+      _startWatchdog();
       _setConnected(true);
       _stopDiscovery(); // connected — stop any parallel mDNS
       _saveCachedHost(_host!);
@@ -194,9 +200,40 @@ class ConnectionManager {
         _onServerDisconnect(reason);
         return;
       }
+      if (_watchdog.onData()) _setDataStale(false);
       _adapter.apply(_uiState, chunk);
       _switchStreamIfNeeded();
     });
+  }
+
+  void _startWatchdog() {
+    _watchdog.connected();
+    _watchdogTimer?.cancel();
+    _watchdogTimer = Timer.periodic(const Duration(milliseconds: 500), (_) => _checkData());
+  }
+
+  void _checkData() {
+    if (_paused || _connecting || !_uiState.isConnected) return;
+    switch (_watchdog.check()) {
+      case WatchdogAction.none:
+        return;
+      case WatchdogAction.stale:
+        _setStatus('no data for ${DataWatchdog.staleAfter.inMilliseconds} ms, video still up');
+        _setDataStale(true);
+      case WatchdogAction.restart:
+        // the same as reopening the app: a fresh session with the same camera
+        _setStatus('no data, rebuilding the session (${_watchdog.restarts})');
+        _setDataStale(true);
+        _teardown();
+        _retryCount = 0;
+        _connect();
+    }
+  }
+
+  void _setDataStale(bool stale) {
+    if (_uiState.dataStale == stale) return;
+    _uiState.dataStale = stale;
+    _uiState.notifyNow();
   }
 
   /// webrtcd ended the session: reconnect at once after a timeout (it shuts
@@ -264,6 +301,7 @@ class ConnectionManager {
   void _teardown() {
     _connectEpoch++;  // invalidate any in-flight _transport.connect()
     _retryTimer?.cancel();
+    _watchdogTimer?.cancel();
     _dataSub?.cancel();
     _stateSub?.cancel();
     _stateSub = null;
@@ -280,11 +318,13 @@ class ConnectionManager {
     _reconnecting = true;
 
     _retryTimer?.cancel();
+    _watchdogTimer?.cancel();
     _dataSub?.cancel();
     _stateSub?.cancel();
     _stateSub = null;
     _adapter.reset();
     _transport.close();  // free server-side session
+    _setDataStale(false);
     _setConnected(false);
 
     _retryCount++;

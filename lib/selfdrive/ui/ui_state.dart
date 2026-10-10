@@ -92,6 +92,9 @@ class UIState extends ChangeNotifier {
   double torqueOutput = 0.0;
 
   // driverMonitoringState
+  /// connected, but no telemetry for a moment: the overlay is showing old data
+  bool dataStale = false;
+
   bool dmSeen = false;
   bool dmActive = false;             // camera-based monitoring is running
   bool dmFaceDetected = false;
