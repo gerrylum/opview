@@ -174,8 +174,12 @@ class ModelRendererPainter extends CustomPainter {
     // draw everything
     _drawLaneLines(canvas, laneLinePolys);
     _drawRoadEdges(canvas, roadEdgePolys);
-    _drawPath(canvas, pathPoly);
-    if (pathEdgeLines && state.status != UIStatus.disengaged) _drawPathEdges(canvas, pathPoly);
+    // the path is openpilot's plan, so it shows only while openpilot is engaged (steering,
+    // speed, or both); lane lines and road edges stay
+    if (state.status != UIStatus.disengaged) {
+      _drawPath(canvas, pathPoly);
+      if (pathEdgeLines) _drawPathEdges(canvas, pathPoly);
+    }
     _drawLeadIndicators(canvas, pathX);
   }
 

@@ -317,6 +317,27 @@ void main() {
       return paints.map((p) => p.painter).whereType<ModelRendererPainter>().single;
     }
 
+    testWidgets('the path shows only while engaged; lane lines and road edges stay', (tester) async {
+      _screen(tester, 1920, 1080);
+      for (final settings in [AppSettings(), _enhanced()]) {
+        final state = createMockUIState(leadDRel: 0);  // no lead, so only the path differs
+        await tester.pumpWidget(_app(state, settings));
+        final painter = painterOf(tester);
+        int shapes(UIStatus status) {
+          state.status = status;
+          final canvas = _CountingCanvas();
+          painter.paint(canvas, const Size(1920, 1080));
+          return canvas.paths;
+        }
+
+        final disengaged = shapes(UIStatus.disengaged);
+        expect(disengaged, greaterThan(0), reason: 'lane lines and road edges');
+        for (final on in [UIStatus.engaged, UIStatus.latOnly, UIStatus.longOnly, UIStatus.override_]) {
+          expect(shapes(on), greaterThan(disengaged), reason: '${settings.layout} $on');
+        }
+      }
+    });
+
     testWidgets('edge lines and the lead box are on in Enhanced and off in Classic', (tester) async {
       _screen(tester, 1920, 1080);
       await tester.pumpWidget(_app(createMockUIState(), _enhanced()));
@@ -797,4 +818,18 @@ void main() {
       expect(find.byType(TurnSignalRenderer), findsOneWidget);
     });
   });
+}
+
+/// counts the shapes a painter fills or strokes; everything else is ignored
+class _CountingCanvas implements Canvas {
+  int paths = 0;
+
+  @override
+  void drawPath(Path path, Paint paint) => paths++;
+
+  @override
+  int getSaveCount() => 1;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }
