@@ -251,11 +251,11 @@ class ConnectionManager {
     _connect();
   }
 
-  /// switch camera based on experimental mode + speed hysteresis
+  /// wide camera at low speed under openpilot longitudinal control, with speed hysteresis
   /// (augmented_road_view.py:122-136)
   void _switchStreamIfNeeded() {
     String target;
-    if (_uiState.experimentalMode) {
+    if (_uiState.longitudinalControl) {
       final vEgo = _uiState.vEgo;
       if (vEgo < wideCamMaxSpeed) {
         target = 'wideRoad';

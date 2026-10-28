@@ -88,6 +88,23 @@ void main() {
       expect(state.alertStatus, 1);
     });
 
+    test('longitudinal control: the comma says so, or openpilot has driven the pedals', () {
+      final s = UIState();
+      expect(s.longitudinalControl, false);
+      s.applyCarControl({'longActive': true});
+      s.applyCarControl({'longActive': false});
+      expect(s.longitudinalControl, true, reason: 'stays on after openpilot let go');
+      final t = UIState()..applySelfdriveState({'experimentalMode': true});
+      expect(t.longitudinalControl, true, reason: 'older comma branches');
+      final u = UIState()..applyCarControl({'longActive': true});
+      u.applyOpviewParams({'OpenpilotLongitudinalControl': false});
+      expect(u.longitudinalControl, false, reason: "the comma's answer wins");
+      u.applyOpviewParams({'OpenpilotLongitudinalControl': true});
+      expect(u.longitudinalControl, true);
+      u.applyOpviewParams({});
+      expect(u.longitudinalControl, true, reason: 'a params message without it keeps the last answer');
+    });
+
     test('sets experimentalMode', () {
       state.applySelfdriveState({'experimentalMode': true});
       expect(state.experimentalMode, true);

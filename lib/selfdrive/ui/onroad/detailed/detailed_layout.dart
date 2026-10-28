@@ -674,9 +674,6 @@ class DetailedLongitudinalPanel extends StatelessWidget {
       collapsed: collapsed,
       onTap: onTap,
       title: 'LONGITUDINAL',
-      badge: st.experimentalMode
-          ? detailedBadge(unit, 'EXPERIMENTAL', _orange, key: const ValueKey('detailedExperimental'))
-          : detailedBadge(unit, 'CHILL', HudColors.grey, key: const ValueKey('detailedChill')),
       rows: [
         ('ACC', st.cruiseEnabled ? 'on' : 'off', st.cruiseEnabled ? _green : _dimColor),
         ('Personality', formatPersonality(st.personality), Colors.white),

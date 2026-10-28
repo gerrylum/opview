@@ -170,12 +170,12 @@ void main() {
       }
     });
 
-    testWidgets('mode badge: experimental or chill', (tester) async {
+    testWidgets('no Chill or Experimental badge: current openpilot has no such modes', (tester) async {
       _screen(tester, 1920, 1080);
-      await tester.pumpWidget(_app(createMockUIState(experimentalMode: true), _detailed()));
-      expect(find.byKey(const ValueKey('detailedExperimental')), findsOneWidget);
       await tester.pumpWidget(_app(createMockUIState(), _detailed()));
-      expect(find.byKey(const ValueKey('detailedChill')), findsOneWidget);
+      expect(find.text('LONGITUDINAL'), findsOneWidget);
+      expect(find.text('CHILL'), findsNothing);
+      expect(find.text('EXPERIMENTAL'), findsNothing);
     });
 
     testWidgets('speed limit pill: limit, next limit, or dashes', (tester) async {
@@ -262,10 +262,12 @@ void main() {
 
     testWidgets('a folded panel hides its badge', (tester) async {
       _screen(tester, 1920, 1080);
-      final settings = _detailed()..collapsedPanels.add('longitudinal');
-      await tester.pumpWidget(_app(createMockUIState(experimentalMode: true), settings));
-      expect(find.byKey(const ValueKey('detailedExperimental')), findsNothing);
-      expect(find.text('LONGITUDINAL'), findsOneWidget);
+      await tester.pumpWidget(_app(createMockUIState(), _detailed()));
+      expect(find.textContaining('VISION'), findsOneWidget);
+      final settings = _detailed()..collapsedPanels.add('lead');
+      await tester.pumpWidget(_app(createMockUIState(), settings));
+      expect(find.textContaining('VISION'), findsNothing);
+      expect(find.text('LEAD'), findsOneWidget);
     });
 
     testWidgets('driver icon and confidence indicator, the same size, side by side', (tester) async {

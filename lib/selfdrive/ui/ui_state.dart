@@ -214,6 +214,19 @@ class UIState extends ChangeNotifier {
   int carFlags = 0;
   bool latActive = false;
   bool longActive = false;
+
+  /// openpilot has driven the throttle and brakes at least once (carControl.longActive)
+  bool longActiveSeen = false;
+
+  /// the comma's own answer to whether openpilot runs the throttle and brakes
+  /// (opviewParams OpenpilotLongitudinalControl); null on comma branches that do not send it
+  bool? opLongitudinalControl;
+
+  /// openpilot runs the throttle and brakes. Current openpilot has no Chill or Experimental
+  /// mode: the path takes the acceleration colours and the wide camera is used at low speed
+  /// whenever this is true (model_renderer.py, augmented_road_view.py). Without the comma's
+  /// answer: experimental mode on older branches, or openpilot having braked or accelerated
+  bool get longitudinalControl => opLongitudinalControl ?? (experimentalMode || longActiveSeen);
   double accelCommand = 0.0;  // carControl.actuators.accel, m/s^2
   int _zeroTorqueCount = zeroTorqueHold;
   LateralMode? lateralMode;
@@ -225,7 +238,7 @@ class UIState extends ChangeNotifier {
   final accelCommandHistory = <double>[];
   final accelActualHistory = <double>[];
 
-  // active camera: 'road' or 'wideRoad' (switches on experimental mode)
+  // active camera: 'road' or 'wideRoad' (wide at low speed under openpilot longitudinal control)
   String streamType = 'road';
 
   // connection state — drives "Connecting..." overlay + screen wake lock
@@ -451,6 +464,8 @@ class UIState extends ChangeNotifier {
     // car make and flags (carParams is only published every ~50 s)
     brand = data['CarBrand'] as String? ?? brand;
     carFlags = (data['CarFlags'] as num?)?.toInt() ?? carFlags;
+    final opLong = data['OpenpilotLongitudinalControl'];
+    if (opLong is bool) opLongitudinalControl = opLong;
     // no notify — picked up on next modelV2
   }
 
@@ -522,6 +537,7 @@ class UIState extends ChangeNotifier {
   void applyCarControl(Map<String, dynamic> data) {
     latActive = data['latActive'] as bool? ?? false;
     longActive = data['longActive'] as bool? ?? false;
+    if (longActive) longActiveSeen = true;
     accelCommand = (data['actuators']?['accel'] as num?)?.toDouble() ?? 0.0;
     targetSteeringAngleDeg = (data['actuators']?['steeringAngleDeg'] as num?)?.toDouble() ?? 0.0;
   }

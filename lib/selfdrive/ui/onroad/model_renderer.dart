@@ -203,7 +203,7 @@ class ModelRendererPainter extends CustomPainter {
   void _drawPath(Canvas canvas, List<Offset> pathPoly) {
     if (pathPoly.isEmpty) return;
 
-    if (state.experimentalMode) {
+    if (state.longitudinalControl) {
       _drawExperimentalPath(canvas, pathPoly);
       return;
     }
@@ -249,7 +249,7 @@ class ModelRendererPainter extends CustomPainter {
     canvas.drawPath(right, paint);
   }
 
-  /// experimental mode: HSL acceleration gradient
+  /// openpilot longitudinal control: HSL acceleration gradient (green speeding up, red slowing)
   void _drawExperimentalPath(Canvas canvas, List<Offset> pathPoly) {
     if (pathPoly.length < 2) return;
 

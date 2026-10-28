@@ -1,4 +1,5 @@
-// steering wheel / experimental mode button, top right (display only, not tappable)
+// steering wheel, top right (display only, not tappable). Current openpilot has no
+// experimental mode, so the stock experimental icon is gone; the wheel keeps the Rivian tint
 // ported from openpilot selfdrive/ui/onroad/exp_button.py with the sunnypilot
 // Rivian angle/torque tint from selfdrive/ui/sunnypilot/onroad/lateral_mode.py
 //
@@ -29,10 +30,9 @@ class ExpButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final exp = uiState.experimentalMode;
     final alpha = (uiState.engageable || uiState.enabled) ? 255 : 180;
     final tint = wheelTint(uiState.lateralMode);
-    final iconColor = (tint != null && !exp ? tint : Colors.white).withAlpha(alpha);
+    final iconColor = (tint ?? Colors.white).withAlpha(alpha);
     final size = _buttonSize * scale;
 
     return Positioned(
@@ -44,12 +44,10 @@ class ExpButton extends StatelessWidget {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: const Color(0xA6000000),
-          // tinting the coloured experimental icon is invisible, so it gets a ring instead
-          border: tint != null && exp ? Border.all(color: tint.withAlpha(alpha), width: 8 * scale) : null,
         ),
         alignment: Alignment.center,
         child: Image.asset(
-          exp ? 'assets/icons/experimental.png' : 'assets/icons/chffr_wheel.png',
+          'assets/icons/chffr_wheel.png',
           width: _iconSize * scale,
           height: _iconSize * scale,
           color: iconColor,
