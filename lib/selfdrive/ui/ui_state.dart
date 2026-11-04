@@ -45,6 +45,9 @@ enum SpeedLimitDisplay { auto, always, off }
 
 // -- state --
 
+/// lateral acceleration (m/s²) that fills the lane guard band: the Rivian tune's limit
+const laneGuardFullScale = 0.4;
+
 class UIState extends ChangeNotifier {
   // engagement
   UIStatus status = UIStatus.disengaged;
@@ -217,6 +220,18 @@ class UIState extends ChangeNotifier {
 
   /// openpilot has driven the throttle and brakes at least once (carControl.longActive)
   bool longActiveSeen = false;
+
+  // carControlSP.laneGuard — EVPilot's lane guard (comma: selfdrive/controls/lib/lane_guard.py).
+  // Comma branches without it never send it, and the torque bar stays plain
+  bool laneGuardSeen = false;
+  bool laneGuardEnabled = false;   // the LaneGuardEnabled setting
+  bool laneGuardActive = false;    // guarding: openpilot steering, the driver not, above 8 m/s
+  String laneGuardPaused = 'none'; // none / driverSteering / laneChange / slow
+  double laneGuardCurvature = 0.0; // 1/m added to the model's, positive pushes right
+  String laneGuardSource = 'none'; // what the push is away from: none / laneLine / roadEdge
+  bool laneGuardLeftLine = false, laneGuardRightLine = false;  // lane lines guarded
+  bool laneGuardLeftEdge = false, laneGuardRightEdge = false;  // road edges guarded
+  double laneGuardLeftGap = 0.0, laneGuardRightGap = 0.0;      // m, body to the nearest guarded one
 
   /// the comma's own answer to whether openpilot runs the throttle and brakes
   /// (opviewParams OpenpilotLongitudinalControl); null on comma branches that do not send it
@@ -541,6 +556,31 @@ class UIState extends ChangeNotifier {
     accelCommand = (data['actuators']?['accel'] as num?)?.toDouble() ?? 0.0;
     targetSteeringAngleDeg = (data['actuators']?['steeringAngleDeg'] as num?)?.toDouble() ?? 0.0;
   }
+
+  void applyCarControlSP(Map<String, dynamic> data) {
+    final lg = data['laneGuard'];
+    if (lg is! Map) return;
+    laneGuardSeen = true;
+    laneGuardEnabled = lg['enabled'] as bool? ?? false;
+    laneGuardActive = lg['active'] as bool? ?? false;
+    laneGuardPaused = lg['pausedReason'] as String? ?? 'none';
+    laneGuardCurvature = (lg['curvature'] as num?)?.toDouble() ?? 0.0;
+    laneGuardSource = lg['source'] as String? ?? 'none';
+    laneGuardLeftLine = lg['leftLineGuarded'] as bool? ?? false;
+    laneGuardRightLine = lg['rightLineGuarded'] as bool? ?? false;
+    laneGuardLeftEdge = lg['leftEdgeGuarded'] as bool? ?? false;
+    laneGuardRightEdge = lg['rightEdgeGuarded'] as bool? ?? false;
+    laneGuardLeftGap = (lg['leftGap'] as num?)?.toDouble() ?? 0.0;
+    laneGuardRightGap = (lg['rightGap'] as num?)?.toDouble() ?? 0.0;
+  }
+
+  /// the lane guard band and marks are on the torque bar: lane guard is on and openpilot steers
+  bool get showsLaneGuard => laneGuardSeen && laneGuardEnabled && latActive;
+
+  /// lane guard's push as a share of its limit, -1..1 (the Rivian tune's 0.4 m/s² is full);
+  /// positive pushes right, the same way round as [torqueBarValue]
+  double get laneGuardPush =>
+      (laneGuardCurvature * vEgo * vEgo / laneGuardFullScale).clamp(-1.0, 1.0).toDouble();
 
   /// lateral_mode.py: on an angle-capable Rivian while MADS steers, the car sends no CAN
   /// torque when it steers on its angle channel

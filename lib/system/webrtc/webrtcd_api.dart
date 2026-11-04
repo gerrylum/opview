@@ -25,6 +25,7 @@ const bridgeServicesOut = [
   'selfdriveStateSP',
   'onroadEvents',
   'driverMonitoringState',  // Enhanced layout: driver monitoring icon
+  'carControlSP',           // EVPilot lane guard on the torque bar
 ];
 
 // names used before openpilot renamed these services

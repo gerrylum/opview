@@ -25,6 +25,7 @@ import 'package:flutter/material.dart';
 import 'package:opview/common/transformations.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
+import 'package:opview/selfdrive/ui/onroad/enhanced/lane_guard_bar.dart';
 import 'package:opview/selfdrive/ui/onroad/exp_button.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
@@ -229,7 +230,12 @@ class EnhancedLayout extends StatelessWidget {
 
             if (shows(DriveSection.torque))
               CustomPaint(
-                painter: EnhancedTorqueBarPainter(value: st.torqueBarValue, status: st.status, unit: unit),
+                painter: EnhancedTorqueBarPainter(
+                  value: st.torqueBarValue,
+                  status: st.status,
+                  unit: unit,
+                  laneGuard: LaneGuardBar.of(st),
+                ),
               ),
 
             // road name, a tab hanging from the top border
@@ -838,23 +844,29 @@ class EnhancedCornerClock extends StatelessWidget {
 // -- torque bar (mici/onroad/torque_bar.py) --
 
 /// arc along the bottom of the screen: grey track, filled from the centre towards
-/// the side the car is steering, turning orange near the limit
+/// the side the car is steering, turning orange near the limit.
+/// With [laneGuard] it stays thin (so the band, ticks and marks keep their size) and
+/// carries lane guard's band and marks (lane_guard_bar.dart)
 class EnhancedTorqueBarPainter extends CustomPainter {
   final double value;  // -1..1
   final UIStatus status;
   final double unit;
+  final LaneGuardBar? laneGuard;
 
-  const EnhancedTorqueBarPainter({required this.value, required this.status, required this.unit});
+  const EnhancedTorqueBarPainter({required this.value, required this.status, required this.unit, this.laneGuard});
 
   @override
   void paint(Canvas canvas, Size size) {
     // hidden when nothing is steering
     if (status == UIStatus.disengaged || status == UIStatus.longOnly) return;
     final steering = status == UIStatus.engaged || status == UIStatus.latOnly;
+    final guard = steering ? laneGuard : null;
 
     final mag = value.abs();
-    final offset = (_interp(mag, 0.5, 1, 22, 26) + enhancedBorderWidth + enhancedTorqueRaise) * unit;
-    final thickness = _interp(mag, 0.5, 1, 14, 56) * unit;
+    // the bar grows with the torque, except while it carries lane guard
+    final grow = guard == null ? mag : 0.0;
+    final offset = (_interp(grow, 0.5, 1, 22, 26) + enhancedBorderWidth + enhancedTorqueRaise) * unit;
+    final thickness = _interp(grow, 0.5, 1, 14, 56) * unit;
     final radius = _torqueRadius * unit;
     final midR = radius + thickness / 2;
     final center = Offset(size.width / 2, size.height + radius - offset);
@@ -862,6 +874,7 @@ class EnhancedTorqueBarPainter extends CustomPainter {
 
     const top = -pi / 2;
     const halfSpan = _torqueAngleSpanDeg / 2 * pi / 180;
+    final lg = LaneGuardArc(center, midR, top, halfSpan, thickness);
 
     final paint = Paint()
       ..style = PaintingStyle.stroke
@@ -872,6 +885,7 @@ class EnhancedTorqueBarPainter extends CustomPainter {
     final trackAlpha = steering ? _interp(mag, 0.5, 1, 0.25, 0.5) : 0.15;
     paint.color = Color.fromRGBO(255, 255, 255, trackAlpha);
     canvas.drawArc(arc, top - halfSpan, 2 * halfSpan, false, paint);
+    if (guard != null) lg.paintTicks(canvas);
 
     // fill
     if (mag > 0.001) {
@@ -880,6 +894,14 @@ class EnhancedTorqueBarPainter extends CustomPainter {
           ? Color.lerp(const Color(0xE6FFFFFF), const Color(0xFFFF7300), hot)!
           : const Color(0x59FFFFFF);
       canvas.drawArc(arc, top, halfSpan * value, false, paint);
+    }
+
+    if (guard != null) {
+      lg.paintBand(canvas, guard.push, guard.color);
+      lg.paintDetent(canvas);
+      lg.paintMark(canvas, guard.left, left: true);
+      lg.paintMark(canvas, guard.right, left: false);
+      return;
     }
 
     // centre dot while the bar is thin
@@ -894,7 +916,7 @@ class EnhancedTorqueBarPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(EnhancedTorqueBarPainter old) =>
-      old.value != value || old.status != status || old.unit != unit;
+      old.value != value || old.status != status || old.unit != unit || old.laneGuard != laneGuard;
 }
 
 /// linear interpolation of [x] from [x0]..[x1] to [y0]..[y1], held at the ends
