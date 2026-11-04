@@ -157,8 +157,17 @@ class _SettingsBody extends StatelessWidget {
               style: TextStyle(color: Colors.white, fontSize: 15 * unit, fontWeight: FontWeight.bold, height: 1.0),
             ),
             SizedBox(width: 12 * unit),
-            for (final t in _Tab.values) _tabButton(t),
-            const Spacer(),
+            // the tabs shrink rather than pushing the close button off the edge
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [for (final t in _Tab.values) _tabButton(t)]),
+                ),
+              ),
+            ),
+            SizedBox(width: 8 * unit),
             InkWell(
               onTap: onClose,
               customBorder: const CircleBorder(),
