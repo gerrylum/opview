@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
+import 'package:opview/selfdrive/ui/shell/app_shell.dart';
 import 'package:opview/services/app_settings.dart';
 import 'package:opview/services/connection_manager.dart';
 import 'package:opview/services/system_service.dart';
@@ -81,15 +82,23 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
       ),
       home: ListenableBuilder(
         listenable: Listenable.merge([_uiState, _settings, pipMode]),
-        builder: (context, _) => AugmentedRoadView(
-          uiState: _uiState,
-          videoRenderer: _connectionManager.videoRenderer,
-          loadManualHost: _connectionManager.loadManualHost,
-          onSetManualHost: _connectionManager.setManualHost,
-          currentHost: () => _connectionManager.host,
-          settings: _settings,
-          pip: pipMode.value,
-        ),
+        // the floating window shows the camera view alone; otherwise the full screen
+        // with the menu column and status bar
+        builder: (context, _) => pipMode.value
+            ? AugmentedRoadView(
+                uiState: _uiState,
+                videoRenderer: _connectionManager.videoRenderer,
+                settings: _settings,
+                pip: true,
+              )
+            : AppShell(
+                uiState: _uiState,
+                settings: _settings,
+                videoRenderer: _connectionManager.videoRenderer,
+                loadManualHost: _connectionManager.loadManualHost,
+                onSetManualHost: _connectionManager.setManualHost,
+                currentHost: () => _connectionManager.host,
+              ),
       ),
     );
   }

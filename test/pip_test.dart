@@ -36,15 +36,6 @@ void main() {
       });
     }
 
-    testWidgets('every layout setting shows the same PiP window', (tester) async {
-      _screen(tester, 480, 270);
-      for (final layout in OnroadLayout.values) {
-        await tester.pumpWidget(_app(createMockUIState(), settings: AppSettings()..layout = layout));
-        expect(find.byType(PipLayout), findsOneWidget, reason: '$layout');
-        expect(tester.takeException(), isNull);
-      }
-    });
-
     testWidgets('no lead pill while disengaged', (tester) async {
       _screen(tester, 480, 270);
       await tester.pumpWidget(_app(createMockUIState(engaged: false)));

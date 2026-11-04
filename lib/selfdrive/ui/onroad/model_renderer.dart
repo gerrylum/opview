@@ -107,6 +107,10 @@ class ModelRendererPainter extends CustomPainter {
 
   /// with [leadReticle]: draw the distance tags (picture-in-picture leaves them to its lead pill)
   final bool leadTags;
+
+  /// with [pathEdgeLines]: one colour for both edge lines, the engagement border's, so the
+  /// path outline matches the frame around the video; null blends by throttle as before
+  final Color? pathEdgeColor;
   final int _version;
 
   ModelRendererPainter({
@@ -122,6 +126,7 @@ class ModelRendererPainter extends CustomPainter {
     this.pathFadeStop = 0.5,
     this.secondLeadColor,
     this.leadTags = true,
+    this.pathEdgeColor,
   }) : _version = state.version;
 
   // working data — rebuilt each paint
@@ -234,7 +239,8 @@ class ModelRendererPainter extends CustomPainter {
     if (maxY - minY < 1) return;
 
     // the fill's colour at full strength: green with throttle, white without
-    final base = Color.lerp(pathEdgeNoThrottleColor, pathEdgeThrottleColor, state.throttleBlend.clamp(0.0, 1.0))!;
+    final base = pathEdgeColor ??
+        Color.lerp(pathEdgeNoThrottleColor, pathEdgeThrottleColor, state.throttleBlend.clamp(0.0, 1.0))!;
     final paint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = max(2.0, 6 * contentRect.height / 1080.0)
@@ -623,5 +629,5 @@ class ModelRendererPainter extends CustomPainter {
   bool shouldRepaint(ModelRendererPainter oldDelegate) =>
     oldDelegate._version != _version || !identical(oldDelegate.carSpaceTransform, carSpaceTransform) ||
     oldDelegate.showLeads != showLeads || oldDelegate.secondLeadColor != secondLeadColor ||
-    oldDelegate.leadTags != leadTags;
+    oldDelegate.leadTags != leadTags || oldDelegate.pathEdgeColor != pathEdgeColor;
 }

@@ -136,17 +136,25 @@ void main() {
       return settings;
     }
 
-    testWidgets('two columns: brightness on the left, updates on the right', (tester) async {
+    Future<void> updatesTab(WidgetTester tester) async {
+      await tester.tap(find.byKey(const ValueKey('settingsTab_updates')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('brightness on the Display tab, updates on their own tab', (tester) async {
       await open(tester, _updater('0.1.1-mici.4', () => http.Response('{}', 200)));
       expect(find.text('BRIGHTNESS'), findsOneWidget);
+      expect(find.text('OPRIVVIEW UPDATES'), findsNothing);
+      await updatesTab(tester);
       expect(find.text('OPRIVVIEW UPDATES'), findsOneWidget);
-      expect(tester.getCenter(find.text('BRIGHTNESS')).dx, lessThan(tester.getCenter(find.text('OPRIVVIEW UPDATES')).dx));
+      expect(find.text('BRIGHTNESS'), findsNothing);
       expect(find.byKey(const ValueKey('updateCheck')), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
     testWidgets('Check finds a newer release and offers Update with its notes', (tester) async {
       await open(tester, _updater('0.1.1-mici.4', () => http.Response(jsonEncode(_release('v0.1.1-mici.5')), 200)));
+      await updatesTab(tester);
       await tester.tap(find.byKey(const ValueKey('updateCheck')));
       await tester.pumpAndSettle();
       expect(find.text('Update available'), findsOneWidget);

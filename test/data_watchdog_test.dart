@@ -73,14 +73,13 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final state = UIState()..isConnected = true;
-    for (final layout in OnroadLayout.values) {
-      final settings = AppSettings()..layout = layout;
+    for (final settings in [AppSettings()]) {
       state.dataStale = false;
       await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: state, settings: settings)));
       expect(find.byKey(const ValueKey('dataPausedTag')), findsNothing);
       state.dataStale = true;
       await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: state, settings: settings)));
-      expect(find.byKey(const ValueKey('dataPausedTag')), findsOneWidget, reason: '$layout');
+      expect(find.byKey(const ValueKey('dataPausedTag')), findsOneWidget);
       expect(tester.takeException(), isNull);
     }
   });

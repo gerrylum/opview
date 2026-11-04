@@ -2,7 +2,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
 import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
 import 'package:opview/selfdrive/ui/settings/settings_dialog.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
@@ -75,6 +74,15 @@ void main() {
       await s.setSpeedLimitDisplay(SpeedLimitDisplay.always);
       await s.setSpeedLimitDisplay(SpeedLimitDisplay.always);
       expect(calls, 1);
+    });
+
+    test('a road name hidden by an earlier build stays hidden', () async {
+      SharedPreferences.setMockInitialValues({'show_road_name': false});
+      final s = AppSettings();
+      await s.load();
+      expect(s.showRoadName, isFalse);
+      expect(s.shows(DriveSection.roadName), isFalse);
+      expect(s.shows(DriveSection.speed), isTrue);
     });
 
     test('road name: shown by default, can be hidden, remembered', () async {
@@ -152,10 +160,13 @@ void main() {
   group('settings menu', () {
     test('short names, in the order offered', () {
       expect(SpeedLimitDisplay.values.map(speedLimitDisplayLabel).toList(), ['Auto', 'Always', 'Off']);
-      expect(OnroadLayout.values.map(onroadLayoutLabel).toList(), ['Classic', 'Enhanced', 'Detailed']);
+      expect(DriveSection.values.map(driveSectionLabel).toList(), [
+        'Speed and MAX', 'Road name', 'Driver monitoring', 'Confidence ball',
+        'Steering details', 'Lead car details', 'Torque bar', 'Status bar',
+      ]);
     });
 
-    Future<void> open(WidgetTester tester, {String? host, bool manual = false, VoidCallback? onChange}) async {
+    Future<void> open(WidgetTester tester, {String? host, bool manual = false, VoidCallback? onChange, bool commaTab = true}) async {
       tester.view.physicalSize = const Size(1920, 1080);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -175,7 +186,36 @@ void main() {
       ));
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
+      // the comma's address is on the Comma tab
+      if (commaTab) {
+        await tester.tap(find.byKey(const ValueKey('settingsTab_comma')));
+        await tester.pumpAndSettle();
+      }
     }
+
+    testWidgets('opens on the Display tab, with a switch for every section', (tester) async {
+      await open(tester, commaTab: false);
+      expect(find.text('SHOW ON SCREEN'), findsOneWidget);
+      for (final s in DriveSection.values) {
+        expect(find.text(driveSectionLabel(s)), findsOneWidget);
+      }
+      expect(find.text('SPEED LIMIT'), findsOneWidget);
+      expect(find.text('BRIGHTNESS'), findsOneWidget);
+      expect(find.text('COMMA DEVICE'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a section switch hides it and is remembered', (tester) async {
+      await open(tester, commaTab: false);
+      await tester.ensureVisible(find.byKey(const ValueKey('section_torque')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('section_torque')));
+      await tester.pumpAndSettle();
+      final again = AppSettings();
+      await again.load();
+      expect(again.shows(DriveSection.torque), isFalse);
+      expect(again.shows(DriveSection.speed), isTrue);
+    });
 
     testWidgets('shows the comma address, how it was found, and the build', (tester) async {
       await open(tester, host: '192.168.1.50');
@@ -248,70 +288,6 @@ void main() {
       time = DateTime(2026, 10, 7, 14, 6, 0);
       await tester.pump(const Duration(seconds: 2));
       expect(find.text('14:06'), findsOneWidget);
-    });
-  });
-
-  group('AugmentedRoadView settings', () {
-    UIState connected() {
-      final s = UIState();
-      s.isConnected = true;
-      return s;
-    }
-
-    // same full HD surface the screenshot tests use
-    void fullHd(WidgetTester tester) {
-      tester.view.physicalSize = const Size(1920, 1080);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-    }
-
-    testWidgets('Classic always shows a 12 hour clock', (tester) async {
-      fullHd(tester);
-      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: connected(), settings: AppSettings())));
-      expect(find.byType(ClockRenderer), findsOneWidget);
-      expect(tester.widget<ClockRenderer>(find.byType(ClockRenderer)).mode, ClockMode.h12);
-    });
-
-    testWidgets('the menu has no clock setting', (tester) async {
-      fullHd(tester);
-      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: connected(), settings: AppSettings())));
-      await tester.longPress(find.byType(AugmentedRoadView));
-      await tester.pumpAndSettle();
-      expect(find.text('CLOCK'), findsNothing);
-      expect(find.text('24 hour'), findsNothing);
-      expect(find.text('SPEED LIMIT'), findsOneWidget);
-      expect(find.text('ROAD NAME'), findsOneWidget);
-    });
-
-    testWidgets('long press opens settings and a choice takes effect', (tester) async {
-      fullHd(tester);
-      SharedPreferences.setMockInitialValues({});
-      final settings = AppSettings();
-      await tester.pumpWidget(MaterialApp(
-        home: ListenableBuilder(
-          listenable: settings,
-          builder: (context, _) => AugmentedRoadView(uiState: connected(), settings: settings),
-        ),
-      ));
-
-      await tester.longPress(find.byType(AugmentedRoadView));
-      await tester.pumpAndSettle();
-      expect(find.text('Settings'), findsOneWidget);
-
-      await tester.tap(find.text('Always'));
-      await tester.pumpAndSettle();
-      expect(settings.speedLimitDisplay, SpeedLimitDisplay.always);
-
-      await tester.tap(find.text('Enhanced'));
-      await tester.pumpAndSettle();
-      expect(settings.layout, OnroadLayout.enhanced);
-    });
-
-    testWidgets('settings are reachable from the connecting screen', (tester) async {
-      fullHd(tester);
-      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: UIState(), settings: AppSettings())));
-      expect(find.text('Settings'), findsOneWidget);
     });
   });
 }

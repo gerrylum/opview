@@ -8,14 +8,12 @@ import 'package:opview/common/transformations.dart';
 import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
 import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/enhanced/enhanced_layout.dart';
-import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/model_renderer.dart';
 import 'package:opview/selfdrive/ui/onroad/top_row.dart';
 import 'package:opview/selfdrive/ui/onroad/turn_signal_renderer.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/impl/cereal_adapter.dart';
 import 'package:opview/services/app_settings.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'golden/mock_ui_state.dart';
 
 void _screen(WidgetTester tester, double w, double h) {
@@ -27,7 +25,6 @@ void _screen(WidgetTester tester, double w, double h) {
 
 AppSettings _enhanced({ClockMode clock = ClockMode.h12}) {
   final s = AppSettings();
-  s.layout = OnroadLayout.enhanced;
   s.clockMode = clock;
   return s;
 }
@@ -260,57 +257,6 @@ void main() {
     expect(full.videoWidth, closeTo(classic.videoWidth, 1e-6));
   });
 
-  group('layout setting', () {
-    test('defaults to Classic and is saved', () async {
-      SharedPreferences.setMockInitialValues({});
-      final a = AppSettings();
-      await a.load();
-      expect(a.layout, OnroadLayout.classic);
-      await a.setLayout(OnroadLayout.enhanced);
-
-      final b = AppSettings();
-      await b.load();
-      expect(b.layout, OnroadLayout.enhanced);
-    });
-
-    test('a layout saved under its old name is still Enhanced', () async {
-      SharedPreferences.setMockInitialValues({'onroad_layout': 'miciExtended'});
-      final s = AppSettings();
-      await s.load();
-      expect(s.layout, OnroadLayout.enhanced);
-    });
-
-    testWidgets('Classic draws the original HUD', (tester) async {
-      _screen(tester, 1920, 1080);
-      await tester.pumpWidget(_app(createMockUIState(), AppSettings()));
-      expect(find.byType(HudRenderer), findsOneWidget);
-      expect(find.byType(EnhancedLayout), findsNothing);
-    });
-
-    testWidgets('can be changed from the settings menu', (tester) async {
-      _screen(tester, 1920, 1080);
-      SharedPreferences.setMockInitialValues({});
-      final settings = AppSettings();
-      await tester.pumpWidget(MaterialApp(
-        home: ListenableBuilder(
-          listenable: settings,
-          builder: (context, _) => AugmentedRoadView(uiState: createMockUIState(), settings: settings),
-        ),
-      ));
-
-      await tester.longPress(find.byType(AugmentedRoadView));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Enhanced'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.close));
-      await tester.pumpAndSettle();
-
-      expect(settings.layout, OnroadLayout.enhanced);
-      expect(find.byType(EnhancedLayout), findsOneWidget);
-      expect(find.byType(HudRenderer), findsNothing);
-    });
-  });
-
   group('overlay painter', () {
     ModelRendererPainter painterOf(WidgetTester tester) {
       final paints = tester.widgetList<CustomPaint>(find.byType(CustomPaint));
@@ -319,7 +265,7 @@ void main() {
 
     testWidgets('the path shows only while engaged; lane lines and road edges stay', (tester) async {
       _screen(tester, 1920, 1080);
-      for (final settings in [AppSettings(), _enhanced()]) {
+      for (final settings in [_enhanced()]) {
         final state = createMockUIState(leadDRel: 0);  // no lead, so only the path differs
         await tester.pumpWidget(_app(state, settings));
         final painter = painterOf(tester);
@@ -333,12 +279,12 @@ void main() {
         final disengaged = shapes(UIStatus.disengaged);
         expect(disengaged, greaterThan(0), reason: 'lane lines and road edges');
         for (final on in [UIStatus.engaged, UIStatus.latOnly, UIStatus.longOnly, UIStatus.override_]) {
-          expect(shapes(on), greaterThan(disengaged), reason: '${settings.layout} $on');
+          expect(shapes(on), greaterThan(disengaged), reason: '$on');
         }
       }
     });
 
-    testWidgets('edge lines and the lead box are on in Enhanced and off in Classic', (tester) async {
+    testWidgets('edge lines in the border colour, and the lead box', (tester) async {
       _screen(tester, 1920, 1080);
       await tester.pumpWidget(_app(createMockUIState(), _enhanced()));
       expect(painterOf(tester).pathEdgeLines, true);
@@ -350,16 +296,14 @@ void main() {
       expect(painterOf(tester).maxPathDistance, enhancedPathDistance);
       expect(painterOf(tester).pathFadeStop, enhancedPathFadeStop);
 
+      // the path outline matches the frame around the video: green engaged, blue steering only
+      expect(painterOf(tester).pathEdgeColor, enhancedBorderColor(UIStatus.engaged));
+      final mads = createMockUIState()..status = UIStatus.latOnly;
+      await tester.pumpWidget(_app(mads, _enhanced()));
+      expect(painterOf(tester).pathEdgeColor, enhancedBorderColor(UIStatus.latOnly));
+
       await tester.pumpWidget(_app(createMockUIState(engaged: false), _enhanced()));
       expect(painterOf(tester).showLeads, false);
-
-      await tester.pumpWidget(_app(createMockUIState(), AppSettings()));
-      expect(painterOf(tester).pathEdgeLines, false);
-      expect(painterOf(tester).leadReticle, false);
-      // Classic keeps the stock path
-      expect(painterOf(tester).pathOpacity, 1.0);
-      expect(painterOf(tester).maxPathDistance, maxDrawDistance);
-      expect(painterOf(tester).pathFadeStop, 0.5);
     });
 
     testWidgets('paints without errors in every state and at every lead distance', (tester) async {
@@ -429,17 +373,11 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('a small 12 hour clock in the top right corner', (tester) async {
+    testWidgets('no clock on the camera view: it is in the status bar', (tester) async {
       _screen(tester, 1920, 1080);
       await tester.pumpWidget(_app(createMockUIState(), _enhanced()));
-      final clock = find.byKey(const ValueKey('enhancedClock'));
-      final r = tester.getRect(clock);
-      expect(r.right, closeTo(1920 - _edge, 0.01));
-      expect(r.top, closeTo(_edge, 0.01));
-      expect(r.width, closeTo(enhancedClockWidth * _unit, 0.01));
-      expect(r.height, closeTo(enhancedClockHeight * _unit, 0.01));
-      expect(tester.widget<ClockText>(find.descendant(of: clock, matching: find.byType(ClockText))).mode, ClockMode.h12);
-      // the speed stays centred with nothing beside it
+      expect(find.byKey(const ValueKey('enhancedClock')), findsNothing);
+      expect(find.byType(ClockText), findsNothing);
       expect(tester.getRect(find.text('65')).center.dx, closeTo(960, 1.0));
     });
 
@@ -484,12 +422,17 @@ void main() {
         ..roadName = 'Cam Fella Boulevard';
       await tester.pumpWidget(_app(state, _enhanced()));
       expect(find.text('Cam Fella Boulevard'), findsOneWidget);
-      // the small see-through pill, just under the speed
-      final pill = tester.getRect(find.byKey(const ValueKey('roadNamePill')));
-      expect(pill.height, closeTo(roadNamePillHeight * _unit, 0.01));
-      expect(pill.top, closeTo(_edge + (enhancedSpeedPillHeight + roadNameGap) * _unit, 0.01));
-      await tester.pumpWidget(_app(state, _enhanced()..showRoadName = false));
+      // a tab hanging from the top border, with the speed row just under it
+      final tab = tester.getRect(find.byKey(const ValueKey('roadNameTab')));
+      expect(tab.height, closeTo(roadNameTabHeight * _unit, 0.01));
+      expect(tab.top, closeTo(enhancedBorderWidth * _unit, 0.01));
+      expect(tab.center.dx, closeTo(960, 1.0));
+      final max = tester.getRect(find.byKey(const ValueKey('topRowSetSpeed')));
+      expect(max.top, closeTo(tab.bottom + roadNameTabGap * _unit, 0.01));
+      await tester.pumpWidget(_app(state, _enhanced()..hiddenSections.add(DriveSection.roadName)));
       expect(find.text('Cam Fella Boulevard'), findsNothing);
+      // without it, the speed row goes back up to the corner inset
+      expect(tester.getRect(find.byKey(const ValueKey('topRowSetSpeed'))).top, closeTo(_edge, 0.01));
     });
 
     testWidgets('imperial units show mph, and no speed limit sign is drawn', (tester) async {
@@ -590,7 +533,7 @@ void main() {
       expect(confidenceColors(0.1).$1, const Color(0xFFFF0015));
     });
 
-    testWidgets('beside the driver icon, the same size; empty and dimmed until engaged with data', (tester) async {
+    testWidgets('top right beside the driver icon, the same size; empty and dimmed until engaged with data', (tester) async {
       _screen(tester, 1920, 1080);
       final state = createMockUIState();
       state.applyDriverMonitoringState({'faceDetected': true});
@@ -598,11 +541,13 @@ void main() {
       final ind = find.byKey(const ValueKey('confidenceIndicator'));
       final driver = tester.getRect(find.byKey(const ValueKey('driverIcon')));
       final conf = tester.getRect(ind);
-      expect(driver.width, closeTo(enhancedDriverIconSize * _unit, 0.01));
+      expect(driver.width, closeTo(enhancedDriverIconSize * enhancedCornerIconScale * _unit, 0.01));
       expect(conf.width, closeTo(driver.width, 0.01));
       expect(conf.height, closeTo(driver.height, 0.01));
       expect(conf.top, closeTo(_edge, 0.01));
-      expect(conf.left, closeTo(driver.right + 6 * _unit, 0.01));
+      // top right: the confidence at the corner inset, the driver icon just left of it
+      expect(conf.right, closeTo(1920 - _edge, 0.01));
+      expect(conf.left, closeTo(driver.right + 6 * enhancedCornerIconScale * _unit, 0.01));
 
       ConfidencePainter painter() => tester
           .widgetList<CustomPaint>(find.descendant(of: ind, matching: find.byType(CustomPaint)))
@@ -678,7 +623,7 @@ void main() {
       await tester.pumpWidget(_app(createMockUIState(), _enhanced()));
       final steering = tester.getRect(find.byType(EnhancedSteeringPills));
       final lead = tester.getRect(find.byType(EnhancedLeadPills));
-      expect(steering.width, closeTo(enhancedInfoPillWidth * _unit, 0.01));
+      expect(steering.width, closeTo(enhancedInfoPillWidth * enhancedPillScale * _unit, 0.01));
       expect(lead.size.width, closeTo(steering.size.width, 0.01));
       expect(lead.size.height, closeTo(steering.size.height, 0.01));
       expect(steering.left, closeTo(1920 - lead.right, 0.01));
@@ -776,6 +721,44 @@ void main() {
     });
   });
 
+  group('sections', () {
+    testWidgets('each can be turned off in the settings', (tester) async {
+      _screen(tester, 1920, 1080);
+      final state = createMockUIState()..roadName = 'Cam Fella Boulevard';
+      state.applyDriverMonitoringState({'faceDetected': true});
+      await tester.pumpWidget(_app(state, _enhanced()));
+      expect(find.byType(SpeedTopRow), findsOneWidget);
+      expect(find.byType(EnhancedSteeringPills), findsOneWidget);
+      expect(find.byType(EnhancedLeadPills), findsOneWidget);
+      expect(find.byKey(const ValueKey('driverIcon')), findsOneWidget);
+      expect(find.byKey(const ValueKey('confidenceIndicator')), findsOneWidget);
+      expect(find.byKey(const ValueKey('roadNameTab')), findsOneWidget);
+      bool torqueBar() => tester
+          .widgetList<CustomPaint>(find.byType(CustomPaint))
+          .any((p) => p.painter is EnhancedTorqueBarPainter);
+      expect(torqueBar(), isTrue);
+
+      final none = _enhanced()..hiddenSections.addAll(DriveSection.values);
+      await tester.pumpWidget(_app(state, none));
+      expect(find.byType(SpeedTopRow), findsNothing);
+      expect(find.byType(EnhancedSteeringPills), findsNothing);
+      expect(find.byType(EnhancedLeadPills), findsNothing);
+      expect(find.byKey(const ValueKey('driverIcon')), findsNothing);
+      expect(find.byKey(const ValueKey('confidenceIndicator')), findsNothing);
+      expect(find.byKey(const ValueKey('roadNameTab')), findsNothing);
+      expect(torqueBar(), isFalse);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('without the confidence ball, the driver icon takes the corner', (tester) async {
+      _screen(tester, 1920, 1080);
+      final state = createMockUIState();
+      state.applyDriverMonitoringState({'faceDetected': true});
+      await tester.pumpWidget(_app(state, _enhanced()..hiddenSections.add(DriveSection.confidence)));
+      expect(tester.getRect(find.byKey(const ValueKey('driverIcon'))).right, closeTo(1920 - _edge, 0.01));
+    });
+  });
+
   group('blind spot', () {
     UIState withBlindSpots({required bool show, bool left = false, bool right = false}) {
       final state = createMockUIState();
@@ -808,14 +791,11 @@ void main() {
       expect(find.byKey(const ValueKey('blindSpotRight')), findsNothing);
     });
 
-    testWidgets('no turn signal or blind spot icons in this layout; Classic keeps them', (tester) async {
+    testWidgets('no turn signal or blind spot icons, only the glow', (tester) async {
       _screen(tester, 1920, 1080);
       final state = withBlindSpots(show: true, left: true);
       await tester.pumpWidget(_app(state, _enhanced()));
       expect(find.byType(TurnSignalRenderer), findsNothing);
-
-      await tester.pumpWidget(_app(state, AppSettings()));
-      expect(find.byType(TurnSignalRenderer), findsOneWidget);
     });
   });
 }

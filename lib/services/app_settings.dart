@@ -21,24 +21,32 @@ String speedLimitDisplayLabel(SpeedLimitDisplay d) {
   }
 }
 
-/// which driving display to draw
-enum OnroadLayout { classic, enhanced, detailed }
+/// the parts of the driving screen that can be shown or hidden (Settings > Display)
+enum DriveSection { speed, roadName, driver, confidence, steering, lead, torque, statusBar }
 
-String onroadLayoutLabel(OnroadLayout layout) {
-  switch (layout) {
-    case OnroadLayout.classic:
-      return 'Classic';
-    case OnroadLayout.enhanced:
-      return 'Enhanced';
-    case OnroadLayout.detailed:
-      return 'Detailed';
+/// what each section is called in the settings menu, in the order it lists them
+String driveSectionLabel(DriveSection s) {
+  switch (s) {
+    case DriveSection.speed:
+      return 'Speed and MAX';
+    case DriveSection.roadName:
+      return 'Road name';
+    case DriveSection.driver:
+      return 'Driver monitoring';
+    case DriveSection.confidence:
+      return 'Confidence ball';
+    case DriveSection.steering:
+      return 'Steering details';
+    case DriveSection.lead:
+      return 'Lead car details';
+    case DriveSection.torque:
+      return 'Torque bar';
+    case DriveSection.statusBar:
+      return 'Status bar';
   }
 }
 
-/// what the Enhanced layout was saved as before it was renamed
-const _legacyLayoutNames = {'miciExtended': OnroadLayout.enhanced};
-
-const _layoutKey = 'onroad_layout';
+const _hiddenSectionsKey = 'hidden_sections';
 const _speedLimitKey = 'speed_limit_display';
 const _collapsedKey = 'detailed_collapsed_panels';
 const _roadNameKey = 'show_road_name';
@@ -50,11 +58,15 @@ const minBrightness = 0.05;
 class AppSettings extends ChangeNotifier {
   /// the clock is always shown, in 12 hour time; no longer a setting
   ClockMode clockMode = ClockMode.h12;
-  OnroadLayout layout = OnroadLayout.classic;
   SpeedLimitDisplay speedLimitDisplay = SpeedLimitDisplay.auto;
 
+  /// sections of the driving screen turned off in Settings > Display; everything is on to start
+  final Set<DriveSection> hiddenSections = {};
+
+  bool shows(DriveSection s) => !hiddenSections.contains(s);
+
   /// the road name pill, whatever the comma's own road name setting
-  bool showRoadName = true;
+  bool get showRoadName => shows(DriveSection.roadName);
 
   /// this app's screen brightness while it is open, 0.05..1; null follows the head unit
   double? brightness;
@@ -69,7 +81,18 @@ class AppSettings extends ChangeNotifier {
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     speedLimitDisplay = _byName(SpeedLimitDisplay.values, prefs.getString(_speedLimitKey), SpeedLimitDisplay.auto);
-    showRoadName = prefs.getBool(_roadNameKey) ?? true;
+    hiddenSections.clear();
+    final savedHidden = prefs.getStringList(_hiddenSectionsKey);
+    if (savedHidden != null) {
+      for (final name in savedHidden) {
+        for (final s in DriveSection.values) {
+          if (s.name == name) hiddenSections.add(s);
+        }
+      }
+    } else if (prefs.getBool(_roadNameKey) == false) {
+      // the road name switch of earlier builds
+      hiddenSections.add(DriveSection.roadName);
+    }
     final savedBrightness = prefs.getDouble(_brightnessKey);
     brightness = savedBrightness == null || savedBrightness < 0 ? null : savedBrightness.clamp(minBrightness, 1.0).toDouble();
     if (savedBrightness != null && savedBrightness >= 0) manualBrightness = brightness!;
@@ -77,8 +100,6 @@ class AppSettings extends ChangeNotifier {
     collapsedPanels
       ..clear()
       ..addAll(prefs.getStringList(_collapsedKey) ?? const []);
-    final savedLayout = prefs.getString(_layoutKey);
-    layout = _legacyLayoutNames[savedLayout] ?? _byName(OnroadLayout.values, savedLayout, OnroadLayout.classic);
     notifyListeners();
   }
 
@@ -102,13 +123,16 @@ class AppSettings extends ChangeNotifier {
     await prefs.setDouble(_brightnessKey, v ?? -1);
   }
 
-  Future<void> setShowRoadName(bool value) async {
-    if (value == showRoadName) return;
-    showRoadName = value;
+  /// show or hide one section of the driving screen
+  Future<void> setShows(DriveSection section, bool value) async {
+    if (value == shows(section)) return;
+    value ? hiddenSections.remove(section) : hiddenSections.add(section);
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_roadNameKey, value);
+    await prefs.setStringList(_hiddenSectionsKey, [for (final s in DriveSection.values) if (hiddenSections.contains(s)) s.name]);
   }
+
+  Future<void> setShowRoadName(bool value) => setShows(DriveSection.roadName, value);
 
   /// open a collapsed Detailed panel, or collapse an open one
   Future<void> togglePanel(String name) async {
@@ -116,14 +140,6 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_collapsedKey, collapsedPanels.toList()..sort());
-  }
-
-  Future<void> setLayout(OnroadLayout value) async {
-    if (value == layout) return;
-    layout = value;
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_layoutKey, value.name);
   }
 }
 

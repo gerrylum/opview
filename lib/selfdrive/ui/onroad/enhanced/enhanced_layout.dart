@@ -1,17 +1,19 @@
-// Enhanced layout
+// the driving layout (the only one since the redesign; it grew out of the Enhanced layout)
 //
-// the camera fills the screen inside a rounded border in the engagement colour, and
-// everything else is drawn over it in dark pills:
-//   - top row, centred on the speed: set speed | speed | speed limit (top_row.dart)
-//   - road name under the speed
-//   - driver monitoring icon and model confidence, top left
-//   - a small clock, top right
+// the camera fills the area inside a rounded border in the engagement colour, and
+// everything else is drawn over it in dark pills. Each part can be turned off in
+// Settings > Display ([DriveSection]):
+//   - road name, a tab hanging from the top edge
+//   - top row under it, centred on the speed: set speed | speed | speed limit (top_row.dart)
+//   - driver monitoring icon and model confidence, top right
 //   - steering readout, bottom left: angle or torque mode, target and actual angle
 //   - lead car readout, bottom right: time gap, speed difference, the lead's speed
 //   - torque bar, bottom centre
 //   - a box around the lead car with its distance (drawn by the model renderer)
+//   - the path outline in the border's colour
 //   - a glow from the screen edge on a side whose blind spot is occupied
 //   - alerts as a compact card above the torque bar; critical ones take the screen
+// the clock and device figures are in the status bar under the camera (shell/status_bar.dart)
 //
 // it began as a port of the comma four's own driving screen (openpilot
 // selfdrive/ui/mici/onroad): the driver monitoring icon and the torque bar still
@@ -45,6 +47,13 @@ const enhancedInfoPillWidth = 100.0;  // steering and lead readouts
 const enhancedInfoPillHeight = 20.0;
 const enhancedInfoPillGap = 4.0;
 const enhancedGlowWidth = 70.0;
+
+// the redesign's sizes, relative to the Enhanced layout it grew from
+const enhancedPillScale = 0.7;         // steering and lead readouts, 30% smaller
+const enhancedCornerIconScale = 0.75;  // driver icon and confidence, 25% smaller
+const enhancedTorqueRaise = 14.0;      // torque bar lifted off the bottom edge
+const roadNameTabHeight = 17.0;        // the road name tab hanging from the top border
+const roadNameTabGap = 4.0;            // between the tab and the speed row
 
 // path: a bit more solid than stock, drawn further out, and fading later
 const enhancedPathOpacity = 1.35;
@@ -119,6 +128,9 @@ class EnhancedLayout extends StatelessWidget {
   final ClockMode clockMode;
   final SpeedLimitDisplay speedLimitDisplay;
 
+  /// sections turned off in Settings > Display
+  final Set<DriveSection> hiddenSections;
+
   /// where the camera image goes and the matching overlay transform, for the whole
   /// screen; the same framing as the Classic layout
   final FrameTransform Function(double w, double h) frameFor;
@@ -129,6 +141,7 @@ class EnhancedLayout extends StatelessWidget {
     required this.uiState,
     required this.clockMode,
     this.speedLimitDisplay = SpeedLimitDisplay.auto,
+    this.hiddenSections = const {},
     required this.frameFor,
     required this.videoBuilder,
   });
@@ -142,9 +155,13 @@ class EnhancedLayout extends StatelessWidget {
       final radius = BorderRadius.circular(enhancedCornerRadius * unit);
       final edge = (enhancedBorderWidth + enhancedMargin) * unit;  // screen edge to corner elements
       final frame = frameFor(w, h);
+      bool shows(DriveSection s) => !hiddenSections.contains(s);
 
-      // bottom of the road name pill: the lead's distance tag stays below it
-      final hudBottom = edge + (enhancedSpeedPillHeight + roadNameGap + roadNamePillHeight) * unit;
+      // the road name tab hangs from the top border; the speed row sits just under it
+      final roadShown = shows(DriveSection.roadName) && st.showRoadName;
+      final rowTop = roadShown ? (enhancedBorderWidth + roadNameTabHeight + roadNameTabGap) * unit : edge;
+      // the lead's distance tag stays below the speed row
+      final hudBottom = shows(DriveSection.speed) ? rowTop + enhancedSpeedPillHeight * unit : rowTop;
 
       return ClipRRect(
         borderRadius: radius,
@@ -159,6 +176,7 @@ class EnhancedLayout extends StatelessWidget {
                 carSpaceTransform: frame.carToScreen,
                 contentRect: Rect.fromLTWH(0, 0, w, h),
                 pathEdgeLines: true,
+                pathEdgeColor: enhancedBorderColor(st.status),
                 leadReticle: true,
                 leadTagMinTop: hudBottom + 4 * unit,
                 showLeads: enhancedShowsLead(st.status),
@@ -221,52 +239,54 @@ class EnhancedLayout extends StatelessWidget {
                 ),
               ),
 
-            CustomPaint(
-              painter: EnhancedTorqueBarPainter(value: st.torqueBarValue, status: st.status, unit: unit),
-            ),
+            if (shows(DriveSection.torque))
+              CustomPaint(
+                painter: EnhancedTorqueBarPainter(value: st.torqueBarValue, status: st.status, unit: unit),
+              ),
 
-            // top row: set speed | speed | speed limit, with the speed centred
-            Positioned(
-              top: edge,
-              left: 0,
-              right: 0,
-              height: enhancedSpeedPillHeight * unit,
-              child: SpeedTopRow(uiState: st, unit: unit, speedLimitDisplay: speedLimitDisplay),
-            ),
-
-            // road name under the speed
-            if (st.showRoadName)
+            // road name, a tab hanging from the top border
+            if (roadShown)
               Positioned(
-                top: edge + (enhancedSpeedPillHeight + roadNameGap) * unit,
+                top: enhancedBorderWidth * unit,
                 left: 0,
                 right: 0,
-                child: Center(child: RoadNamePill(name: st.roadName, unit: unit, maxWidth: w * 0.5)),
+                child: Center(child: RoadNameTab(name: st.roadName, unit: unit, maxWidth: w * 0.5)),
               ),
 
-            // driver monitoring and model confidence, top left
-            ...enhancedDriverAndConfidence(st, unit, edge),
-
-            // small clock, top right
-            if (clockMode != ClockMode.off)
+            // top row: set speed | speed | speed limit, with the speed centred
+            if (shows(DriveSection.speed))
               Positioned(
-                right: edge,
-                top: edge,
-                child: EnhancedCornerClock(unit: unit, clockMode: clockMode),
+                top: rowTop,
+                left: 0,
+                right: 0,
+                height: enhancedSpeedPillHeight * unit,
+                child: SpeedTopRow(uiState: st, unit: unit, speedLimitDisplay: speedLimitDisplay),
               ),
+
+            // driver monitoring and model confidence, top right
+            ...enhancedDriverAndConfidence(st, unit, edge,
+                alignRight: true,
+                sizeFactor: enhancedCornerIconScale,
+                driver: shows(DriveSection.driver),
+                confidence: shows(DriveSection.confidence)),
 
             // steering readout, bottom left
-            Positioned(
-              left: edge,
-              bottom: edge,
-              child: ThrottledByVersion(state: st, builder: (_) => EnhancedSteeringPills(uiState: st, unit: unit)),
-            ),
+            if (shows(DriveSection.steering))
+              Positioned(
+                left: edge,
+                bottom: edge,
+                child: ThrottledByVersion(
+                    state: st, builder: (_) => EnhancedSteeringPills(uiState: st, unit: unit * enhancedPillScale)),
+              ),
 
             // lead car readout, bottom right
-            Positioned(
-              right: edge,
-              bottom: edge,
-              child: ThrottledByVersion(state: st, builder: (_) => EnhancedLeadPills(uiState: st, unit: unit)),
-            ),
+            if (shows(DriveSection.lead))
+              Positioned(
+                right: edge,
+                bottom: edge,
+                child: ThrottledByVersion(
+                    state: st, builder: (_) => EnhancedLeadPills(uiState: st, unit: unit * enhancedPillScale)),
+              ),
 
             EnhancedAlert(uiState: st, unit: unit),
 
@@ -284,6 +304,42 @@ class EnhancedLayout extends StatelessWidget {
         ),
       );
     });
+  }
+}
+
+// -- road name tab --
+
+/// the road name in a tab hanging from the top border: square top, rounded bottom
+class RoadNameTab extends StatelessWidget {
+  final String name;
+  final double unit;
+  final double maxWidth;
+
+  const RoadNameTab({super.key, required this.name, required this.unit, required this.maxWidth});
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      key: const ValueKey('roadNameTab'),
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: Container(
+        height: roadNameTabHeight * unit,
+        padding: EdgeInsets.symmetric(horizontal: 14 * unit),
+        decoration: BoxDecoration(
+          color: const Color(0xE00E0F10),
+          borderRadius: BorderRadius.vertical(bottom: Radius.circular(9 * unit)),
+        ),
+        child: Center(
+          widthFactor: 1,
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: const Color(0xD9FFFFFF), fontSize: 10 * unit, fontWeight: FontWeight.w600, height: 1.0),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -494,7 +550,7 @@ class EnhancedAlert extends StatelessWidget {
     return Positioned(
       left: 0,
       right: 0,
-      bottom: (enhancedBorderWidth + enhancedMargin + 46) * unit,
+      bottom: (enhancedBorderWidth + enhancedMargin + 46 + enhancedTorqueRaise) * unit,
       child: Center(
         child: Container(
           key: const ValueKey('enhancedAlertCard'),
@@ -567,21 +623,28 @@ class EnhancedDriverIconPainter extends CustomPainter {
 /// form and confidence data has arrived; otherwise it is an empty, dimmed ring
 bool enhancedConfidenceLive(UIState st) => st.status != UIStatus.disengaged && st.confidenceSeen;
 
-/// the driver monitoring icon at the top left corner and the confidence indicator
-/// beside it, the same size; for the Enhanced and Detailed layouts' Stacks
-List<Widget> enhancedDriverAndConfidence(UIState st, double unit, double edge) {
-  final size = enhancedDriverIconSize * unit;
+/// the driver monitoring icon and the confidence indicator beside it, the same size: at
+/// the top left (Detailed), or at the top right with the confidence outermost (the
+/// driving layout). [driver] and [confidence] leave either one out
+List<Widget> enhancedDriverAndConfidence(UIState st, double unit, double edge,
+    {bool alignRight = false, double sizeFactor = 1.0, bool driver = true, bool confidence = true}) {
+  final size = enhancedDriverIconSize * unit * sizeFactor;
   if (!st.started) return const [];
+  final gap = 6 * unit * sizeFactor;
+  // left to right: driver icon, then confidence; on the right the pair ends at the edge
+  final confOffset = edge;
+  final driverOffset = confidence ? edge + size + gap : edge;
   final driverLive = enhancedDriverIconLive(st);
   final confLive = enhancedConfidenceLive(st);
   return [
     // shown whenever the comma reports on the driver: the cone points where the
     // driver's head is turned; dimmed, without the cone, while not engaged or while
     // camera monitoring is not running
-    if (st.dmSeen)
+    if (driver && st.dmSeen)
       Positioned(
         key: const ValueKey('driverIcon'),
-        left: edge,
+        left: alignRight ? null : edge,
+        right: alignRight ? driverOffset : null,
         top: edge,
         width: size,
         height: size,
@@ -596,9 +659,11 @@ List<Widget> enhancedDriverAndConfidence(UIState st, double unit, double edge) {
           ),
         ),
       ),
+    if (confidence)
     Positioned(
       key: const ValueKey('confidenceIndicator'),
-      left: edge + size + 6 * unit,
+      left: alignRight ? null : edge + (driver ? size + gap : 0),
+      right: alignRight ? confOffset : null,
       top: edge,
       width: size,
       height: size,
@@ -706,7 +771,7 @@ class EnhancedTorqueBarPainter extends CustomPainter {
     final steering = status == UIStatus.engaged || status == UIStatus.latOnly;
 
     final mag = value.abs();
-    final offset = (_interp(mag, 0.5, 1, 22, 26) + enhancedBorderWidth) * unit;
+    final offset = (_interp(mag, 0.5, 1, 22, 26) + enhancedBorderWidth + enhancedTorqueRaise) * unit;
     final thickness = _interp(mag, 0.5, 1, 14, 56) * unit;
     final radius = _torqueRadius * unit;
     final midR = radius + thickness / 2;

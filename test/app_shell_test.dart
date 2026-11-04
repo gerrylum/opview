@@ -1,0 +1,185 @@
+// the app's one screen: menu column, camera view, status bar
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
+import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
+import 'package:opview/selfdrive/ui/onroad/enhanced/enhanced_layout.dart';
+import 'package:opview/selfdrive/ui/shell/app_shell.dart';
+import 'package:opview/selfdrive/ui/shell/menu_rail.dart';
+import 'package:opview/selfdrive/ui/shell/status_bar.dart';
+import 'package:opview/selfdrive/ui/ui_state.dart';
+import 'package:opview/services/app_settings.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'golden/mock_ui_state.dart';
+
+void _screen(WidgetTester tester, double w, double h) {
+  tester.view.physicalSize = Size(w, h);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+Widget _shell(UIState state, AppSettings settings, {VoidCallback? onExit}) => MaterialApp(
+      home: ListenableBuilder(
+        listenable: settings,
+        builder: (context, _) => AppShell(uiState: state, settings: settings, onExit: onExit),
+      ),
+    );
+
+UIState _withDevice() {
+  final st = createMockUIState()
+    ..deviceSeen = true
+    ..cpuTempC = 61.4
+    ..memoryUsagePercent = 48
+    ..freeSpacePercent = 28
+    ..networkStrength = 'good'
+    ..powerDrawW = 6.08
+    ..calStatus = 'calibrated'
+    ..gearShifter = 'drive';
+  return st;
+}
+
+void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test('mockup pixels scale to fit the screen', () {
+    expect(shellUnit(const Size(1920, 1000)), 1.0);
+    expect(shellUnit(const Size(1920, 1080)), 1.0);  // limited by width
+    expect(shellUnit(const Size(1280, 480)), closeTo(0.48, 1e-9));  // limited by height
+  });
+
+  test('recording time', () {
+    expect(formatRecordingTime(const Duration(seconds: 134)), '2:14');
+    expect(formatRecordingTime(const Duration(seconds: 5)), '0:05');
+    expect(formatRecordingTime(const Duration(hours: 1, minutes: 2, seconds: 14)), '1:02:14');
+  });
+
+  test('status bar figures', () {
+    final f = statusBarFigures(_withDevice());
+    expect(f.map((e) => e.$1).toList(), ['CPU', 'MEM', 'DISK', 'POWER', 'CALIB', 'GEAR']);
+    expect(f.map((e) => e.$2).toList(), ['61°C', '48%', '72%', '6.1 W', '100%', 'D']);
+    // nothing from the comma yet: dashes, not zeros
+    final none = statusBarFigures(UIState());
+    expect(none.take(4).every((e) => e.$2 == '–'), isTrue);
+  });
+
+  group('screen', () {
+    testWidgets('menu on the left, camera view, status bar underneath', (tester) async {
+      _screen(tester, 1920, 1000);
+      await tester.pumpWidget(_shell(_withDevice(), AppSettings()));
+      final rail = tester.getRect(find.byKey(const ValueKey('menuRail')));
+      final camera = tester.getRect(find.byType(AugmentedRoadView));
+      final bar = tester.getRect(find.byKey(const ValueKey('statusBar')));
+      expect(rail.left, 0);
+      expect(rail.width, closeTo(menuRailWidth, 0.01));
+      expect(rail.height, 1000);
+      expect(camera.left, closeTo(rail.right, 0.01));
+      expect(camera.right, 1920);
+      expect(bar.top, closeTo(camera.bottom, 0.01));
+      expect(bar.height, closeTo(statusBarHeight, 0.01));
+      expect(bar.left, closeTo(camera.left, 0.01));
+      expect(find.byType(EnhancedLayout), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the menu: logo, then every item, Exit last', (tester) async {
+      _screen(tester, 1920, 1000);
+      await tester.pumpWidget(_shell(_withDevice(), AppSettings()));
+      expect(find.byKey(const ValueKey('menuLogo')), findsOneWidget);
+      final tops = [for (final i in MenuItem.values) tester.getRect(find.byKey(ValueKey('menu_${i.name}'))).top];
+      for (var i = 1; i < tops.length; i++) {
+        expect(tops[i], greaterThan(tops[i - 1]), reason: MenuItem.values[i].name);
+      }
+      expect(tester.getRect(find.byKey(const ValueKey('menu_exit'))).bottom, greaterThan(1000 * 0.9));
+      for (final i in MenuItem.values) {
+        expect(find.text(menuItemLabel(i)), findsOneWidget);
+      }
+    });
+
+    testWidgets('the status bar has the clock and the comma\'s figures', (tester) async {
+      _screen(tester, 1920, 1000);
+      await tester.pumpWidget(_shell(_withDevice(), AppSettings()));
+      final bar = find.byKey(const ValueKey('statusBar'));
+      expect(find.descendant(of: bar, matching: find.byType(ClockText)), findsOneWidget);
+      for (final t in ['CPU', '61°C', 'MEM', '48%', 'DISK', '72%', 'WI-FI', 'POWER', '6.1 W', 'CALIB', '100%', 'GEAR', 'D']) {
+        expect(find.descendant(of: bar, matching: find.text(t)), findsOneWidget, reason: t);
+      }
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('turning the status bar off gives its space to the camera', (tester) async {
+      _screen(tester, 1920, 1000);
+      final settings = AppSettings()..hiddenSections.add(DriveSection.statusBar);
+      await tester.pumpWidget(_shell(_withDevice(), settings));
+      expect(find.byKey(const ValueKey('statusBar')), findsNothing);
+      expect(tester.getRect(find.byType(AugmentedRoadView)).bottom, 1000);
+    });
+
+    testWidgets('Settings in the menu opens the settings', (tester) async {
+      _screen(tester, 1920, 1000);
+      await tester.pumpWidget(_shell(_withDevice(), AppSettings()));
+      await tester.tap(find.byKey(const ValueKey('menu_settings')));
+      await tester.pumpAndSettle();
+      expect(find.text('SHOW ON SCREEN'), findsOneWidget);
+    });
+
+    testWidgets('a section switched off in the settings disappears from the screen', (tester) async {
+      _screen(tester, 1920, 1000);
+      final settings = AppSettings();
+      await tester.pumpWidget(_shell(_withDevice(), settings));
+      expect(find.byType(EnhancedSteeringPills), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('menu_settings')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('section_steering')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('section_steering')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+      expect(settings.shows(DriveSection.steering), isFalse);
+      expect(find.byType(EnhancedSteeringPills), findsNothing);
+    });
+
+    testWidgets('screens not built yet say so', (tester) async {
+      _screen(tester, 1920, 1000);
+      await tester.pumpWidget(_shell(_withDevice(), AppSettings()));
+      await tester.tap(find.byKey(const ValueKey('menu_gallery')));
+      await tester.pump();
+      expect(find.text('Gallery is coming in a later build'), findsOneWidget);
+    });
+
+    testWidgets('Exit asks first, and Cancel stays', (tester) async {
+      _screen(tester, 1920, 1000);
+      var exits = 0;
+      await tester.pumpWidget(_shell(_withDevice(), AppSettings(), onExit: () => exits++));
+      await tester.tap(find.byKey(const ValueKey('menu_exit')));
+      await tester.pumpAndSettle();
+      expect(find.text('Exit OPRivView?'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('exitCancel')));
+      await tester.pumpAndSettle();
+      expect(exits, 0);
+      await tester.tap(find.byKey(const ValueKey('menu_exit')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('exitConfirm')));
+      await tester.pumpAndSettle();
+      expect(exits, 1);
+    });
+
+    testWidgets('lays out on every head unit shape without errors', (tester) async {
+      for (final (w, h) in const [(1920.0, 1000.0), (1920.0, 1080.0), (1920.0, 720.0), (1280.0, 480.0), (1024.0, 600.0)]) {
+        _screen(tester, w, h);
+        await tester.pumpWidget(_shell(_withDevice(), AppSettings()));
+        expect(tester.takeException(), isNull, reason: '${w}x$h');
+      }
+    });
+
+    testWidgets('connecting: the camera view says so, the menu and status bar stay', (tester) async {
+      _screen(tester, 1920, 1000);
+      await tester.pumpWidget(_shell(UIState(), AppSettings()));
+      expect(find.text('Connecting…'), findsOneWidget);
+      expect(find.byKey(const ValueKey('menuRail')), findsOneWidget);
+      expect(find.byKey(const ValueKey('statusBar')), findsOneWidget);
+    });
+  });
+}

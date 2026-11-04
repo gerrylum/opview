@@ -1,7 +1,8 @@
-// settings menu — opened by a long press on the driving display, or from the
-// connecting screen. A dark panel in the style of the Enhanced layout's pills, in two
-// columns: what the screen shows on the left (layout, speed limit, brightness), the
-// comma, the road name and app updates on the right
+// settings menu — opened from the menu column, or from the connecting screen. A dark
+// panel with three tabs:
+//   - Display: which parts of the driving screen show, the speed limit, brightness
+//   - Comma: the comma's address and how it was found
+//   - Updates: this build, and in-app updates
 
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -44,7 +45,7 @@ Future<void> showSettingsDialog(
                 padding: EdgeInsets.fromLTRB(16 * unit, 13 * unit, 16 * unit, 11 * unit),
                 child: ListenableBuilder(
                   listenable: Listenable.merge([settings, updates]),
-                  builder: (context, _) => _SettingsBody(
+                  builder: (context, _) => _SettingsTabs(
                     settings: settings,
                     updater: updates,
                     unit: unit,
@@ -69,7 +70,12 @@ Future<void> showSettingsDialog(
   );
 }
 
-class _SettingsBody extends StatelessWidget {
+enum _Tab { display, comma, updates }
+
+String _tabLabel(_Tab t) => switch (t) { _Tab.display => 'Display', _Tab.comma => 'Comma', _Tab.updates => 'Updates' };
+
+/// keeps which tab is open while the menu is up
+class _SettingsTabs extends StatefulWidget {
   final AppSettings settings;
   final Updater updater;
   final double unit;
@@ -79,7 +85,7 @@ class _SettingsBody extends StatelessWidget {
   final VoidCallback onClose;
   final String? buildLabel;
 
-  const _SettingsBody({
+  const _SettingsTabs({
     required this.settings,
     required this.updater,
     required this.unit,
@@ -91,6 +97,53 @@ class _SettingsBody extends StatelessWidget {
   });
 
   @override
+  State<_SettingsTabs> createState() => _SettingsTabsState();
+}
+
+class _SettingsTabsState extends State<_SettingsTabs> {
+  _Tab _tab = _Tab.display;
+
+  @override
+  Widget build(BuildContext context) => _SettingsBody(
+        settings: widget.settings,
+        updater: widget.updater,
+        unit: widget.unit,
+        host: widget.host,
+        hostIsManual: widget.hostIsManual,
+        onChangeHost: widget.onChangeHost,
+        onClose: widget.onClose,
+        buildLabel: widget.buildLabel,
+        tab: _tab,
+        onTab: (t) => setState(() => _tab = t),
+      );
+}
+
+class _SettingsBody extends StatelessWidget {
+  final AppSettings settings;
+  final Updater updater;
+  final double unit;
+  final String? host;
+  final bool hostIsManual;
+  final VoidCallback? onChangeHost;
+  final VoidCallback onClose;
+  final String? buildLabel;
+  final _Tab tab;
+  final void Function(_Tab) onTab;
+
+  const _SettingsBody({
+    required this.settings,
+    required this.updater,
+    required this.unit,
+    required this.host,
+    required this.hostIsManual,
+    required this.onChangeHost,
+    required this.onClose,
+    required this.buildLabel,
+    required this.tab,
+    required this.onTab,
+  });
+
+  @override
   Widget build(BuildContext context) {
     final buildName = buildLabel;
     return Column(
@@ -99,12 +152,13 @@ class _SettingsBody extends StatelessWidget {
       children: [
         Row(
           children: [
-            Expanded(
-              child: Text(
-                'Settings',
-                style: TextStyle(color: Colors.white, fontSize: 15 * unit, fontWeight: FontWeight.bold, height: 1.0),
-              ),
+            Text(
+              'Settings',
+              style: TextStyle(color: Colors.white, fontSize: 15 * unit, fontWeight: FontWeight.bold, height: 1.0),
             ),
+            SizedBox(width: 12 * unit),
+            for (final t in _Tab.values) _tabButton(t),
+            const Spacer(),
             InkWell(
               onTap: onClose,
               customBorder: const CircleBorder(),
@@ -118,47 +172,12 @@ class _SettingsBody extends StatelessWidget {
           ],
         ),
 
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              flex: 11,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _label('LAYOUT'),
-                  _choices<OnroadLayout>(OnroadLayout.values, settings.layout, onroadLayoutLabel, settings.setLayout),
-                  _label('SPEED LIMIT'),
-                  _choices<SpeedLimitDisplay>(
-                    SpeedLimitDisplay.values,
-                    settings.speedLimitDisplay,
-                    speedLimitDisplayLabel,
-                    settings.setSpeedLimitDisplay,
-                  ),
-                  _note('All layouts. Auto hides it until the comma has a speed limit'),
-                  _label('BRIGHTNESS'),
-                  _brightnessRow(),
-                  _note('Auto follows the head unit. Set here, it applies while OPRivView is open'),
-                ],
-              ),
-            ),
-            SizedBox(width: 16 * unit),
-            Expanded(
-              flex: 10,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _label('COMMA DEVICE'),
-                  _deviceRow(),
-                  _label('ROAD NAME'),
-                  _choices<bool>(const [true, false], settings.showRoadName, (v) => v ? 'Show' : 'Hide', settings.setShowRoadName),
-                  _label('OPRIVVIEW UPDATES'),
-                  _updatesRow(),
-                ],
-              ),
-            ),
-          ],
-        ),
+        SizedBox(height: 4 * unit),
+        switch (tab) {
+          _Tab.display => _displayTab(),
+          _Tab.comma => _commaTab(),
+          _Tab.updates => _updatesTab(),
+        },
 
         if (buildName != null)
           Padding(
@@ -170,6 +189,138 @@ class _SettingsBody extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+
+  Widget _tabButton(_Tab t) {
+    final on = t == tab;
+    return Padding(
+      padding: EdgeInsets.only(right: 4 * unit),
+      child: InkWell(
+        key: ValueKey('settingsTab_${t.name}'),
+        onTap: () => onTab(t),
+        borderRadius: BorderRadius.circular(7 * unit),
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: 9 * unit, vertical: 5 * unit),
+          decoration: BoxDecoration(color: on ? const Color(0x24FFFFFF) : null, borderRadius: BorderRadius.circular(7 * unit)),
+          child: Text(
+            _tabLabel(t),
+            style: TextStyle(
+              color: on ? Colors.white : _labelColor,
+              fontSize: 10.5 * unit,
+              fontWeight: on ? FontWeight.bold : FontWeight.w600,
+              height: 1.0,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// what the driving screen shows: one switch per section on the left; the speed
+  /// limit and brightness on the right
+  Widget _displayTab() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _label('SHOW ON SCREEN'),
+              for (final section in DriveSection.values) _sectionSwitch(section),
+            ],
+          ),
+        ),
+        SizedBox(width: 16 * unit),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _label('SPEED LIMIT'),
+              _choices<SpeedLimitDisplay>(
+                SpeedLimitDisplay.values,
+                settings.speedLimitDisplay,
+                speedLimitDisplayLabel,
+                settings.setSpeedLimitDisplay,
+              ),
+              _note('Auto hides the sign until the comma has a speed limit'),
+              _label('BRIGHTNESS'),
+              _brightnessRow(),
+              _note('Auto follows the head unit. Set here, it applies while OPRivView is open'),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _commaTab() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _label('COMMA DEVICE'),
+        _deviceRow(),
+      ],
+    );
+  }
+
+  Widget _updatesTab() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _label('OPRIVVIEW UPDATES'),
+        _updatesRow(),
+      ],
+    );
+  }
+
+  /// one row of the Show on screen list: the section's name and an on/off switch
+  Widget _sectionSwitch(DriveSection section) {
+    final on = settings.shows(section);
+    return Padding(
+      padding: EdgeInsets.only(bottom: 2 * unit),
+      child: InkWell(
+        key: ValueKey('section_${section.name}'),
+        onTap: () => settings.setShows(section, !on),
+        borderRadius: BorderRadius.circular(8 * unit),
+        child: Container(
+          height: 19 * unit,
+          padding: EdgeInsets.symmetric(horizontal: 9 * unit),
+          decoration: BoxDecoration(color: _rowColor, borderRadius: BorderRadius.circular(8 * unit)),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  driveSectionLabel(section),
+                  style: TextStyle(color: Colors.white, fontSize: 9.5 * unit, fontWeight: FontWeight.w500, height: 1.0),
+                ),
+              ),
+              _switch(on),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// a small on/off pill, green when on
+  Widget _switch(bool on) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      width: 26 * unit,
+      height: 14 * unit,
+      padding: EdgeInsets.all(2 * unit),
+      alignment: on ? Alignment.centerRight : Alignment.centerLeft,
+      decoration: BoxDecoration(
+        color: on ? const Color(0xFF3ADB6D) : const Color(0x33FFFFFF),
+        borderRadius: BorderRadius.circular(7 * unit),
+      ),
+      child: Container(
+        width: 10 * unit,
+        height: 10 * unit,
+        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+      ),
     );
   }
 
