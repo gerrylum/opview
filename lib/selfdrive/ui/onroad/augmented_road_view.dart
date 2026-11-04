@@ -56,7 +56,6 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: LayoutBuilder(builder: (context, constraints) {
-        final screenW = constraints.maxWidth;
         final screenH = constraints.maxHeight;
         final scale = screenH / 1080.0;
         final settings = widget.settings;
