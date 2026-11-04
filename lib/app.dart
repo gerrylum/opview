@@ -7,6 +7,8 @@ import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
 import 'package:opview/selfdrive/ui/shell/app_shell.dart';
 import 'package:opview/services/app_settings.dart';
 import 'package:opview/services/connection_manager.dart';
+import 'package:opview/services/recorder/recorder.dart';
+import 'package:opview/services/recorder/recorder_platform.dart';
 import 'package:opview/services/system_service.dart';
 
 class OpviewApp extends StatefulWidget {
@@ -20,6 +22,7 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
   late final UIState _uiState;
   late final ConnectionManager _connectionManager;
   final AppSettings _settings = AppSettings();
+  late final Recorder _recorder;
 
   // the app went fully into the background (not just PiP or the notification shade)
   final _lifecycle = LifecycleReconnect();
@@ -44,6 +47,9 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
     _connectionManager = ConnectionManager(_uiState);
     _connectionManager.start();
     _settings.load();
+    _recorder = Recorder(platform: MethodChannelRecorder(), settings: _settings, uiState: _uiState);
+    // nothing new is recorded in a picture-in-picture window (it would be the whole screen)
+    pipMode.addListener(_applyForeground);
     // the camera choice in the settings goes to the connection
     _settings.addListener(_applyCameraMode);
     listenForPip();
@@ -54,6 +60,8 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _uiState.removeListener(_updatePipOffer);
+    pipMode.removeListener(_applyForeground);
+    _recorder.dispose();
     _settings.removeListener(_applyCameraMode);
     // async cleanup — best-effort, State.dispose() is sync
     _connectionManager.dispose();
@@ -62,8 +70,16 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  AppLifecycleState _appState = AppLifecycleState.resumed;
+
+  void _applyForeground() =>
+      _recorder.setForeground(_appState == AppLifecycleState.resumed && !pipMode.value);
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // inactive (the notification shade, a dialog) still shows the app
+    _appState = state == AppLifecycleState.inactive ? AppLifecycleState.resumed : state;
+    _applyForeground();
     switch (_lifecycle.onChange(state)) {
       case LifecycleAction.reconnect:
         debugPrint('[opview] app resumed, reconnecting');
@@ -103,6 +119,7 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
                 loadManualHost: _connectionManager.loadManualHost,
                 onSetManualHost: _connectionManager.setManualHost,
                 currentHost: () => _connectionManager.host,
+                recorder: _recorder,
               ),
       ),
     );

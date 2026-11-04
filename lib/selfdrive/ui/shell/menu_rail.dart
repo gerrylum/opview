@@ -14,6 +14,33 @@ const _activeBackground = Color(0x1AFFFFFF);
 const _recordColor = Color(0xFFFF4D4D);
 const _exitColor = Color(0xFFA6A6A6);
 
+const _noteColor = Color(0xFF9A9A9A);
+const _savedColor = Color(0xFF3ADB6D);
+
+/// what Record shows under its name
+sealed class RecordBadge {
+  const RecordBadge();
+}
+
+/// keeping the last [length] ready: "● last 1:00"
+class BufferBadge extends RecordBadge {
+  final Duration length;
+  const BufferBadge(this.length);
+}
+
+/// a clip running: red, "2:14" over "of 5:00"
+class RecordingBadge extends RecordBadge {
+  final Duration length;
+  final Duration cap;
+  const RecordingBadge(this.length, this.cap);
+}
+
+/// a clip just written: "✓ Saved" over "2:14 clip"
+class SavedBadge extends RecordBadge {
+  final Duration length;
+  const SavedBadge(this.length);
+}
+
 /// the menu's entries, top to bottom
 enum MenuItem { navigate, details, record, settings, gallery, exit }
 
@@ -57,12 +84,12 @@ class MenuRail extends StatelessWidget {
   /// the screen showing now, highlighted; null on the plain driving view
   final MenuItem? active;
 
-  /// recording: Record turns red and shows how long it has run
-  final Duration? recording;
+  /// what Record shows under its name; it turns red while a clip runs
+  final RecordBadge? record;
 
   final void Function(MenuItem item) onSelect;
 
-  const MenuRail({super.key, required this.unit, this.active, this.recording, required this.onSelect});
+  const MenuRail({super.key, required this.unit, this.active, this.record, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
@@ -108,8 +135,8 @@ class MenuRail extends StatelessWidget {
   }
 
   Widget _item(MenuItem item) {
-    final rec = item == MenuItem.record ? recording : null;
-    final color = rec != null ? _recordColor : (item == MenuItem.exit ? _exitColor : _itemColor);
+    final badge = item == MenuItem.record ? record : null;
+    final color = badge is RecordingBadge ? _recordColor : (item == MenuItem.exit ? _exitColor : _itemColor);
     return Padding(
       padding: EdgeInsets.only(bottom: 6 * unit),
       child: Material(
@@ -132,18 +159,9 @@ class MenuRail extends StatelessWidget {
                     menuItemLabel(item),
                     style: TextStyle(color: color, fontSize: 20 * unit, fontWeight: FontWeight.w600, height: 1.0),
                   ),
-                  if (rec != null) ...[
+                  if (badge != null) ...[
                     SizedBox(height: 4 * unit),
-                    Text(
-                      formatRecordingTime(rec),
-                      style: TextStyle(
-                        color: _recordColor,
-                        fontSize: 19 * unit,
-                        fontWeight: FontWeight.bold,
-                        height: 1.0,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
+                    _badge(badge),
                   ],
                 ],
               ),
@@ -152,6 +170,35 @@ class MenuRail extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Widget _badge(RecordBadge badge) {
+    TextStyle style(Color c, double size, FontWeight w) =>
+        TextStyle(color: c, fontSize: size * unit, fontWeight: w, height: 1.0, fontFeatures: const [FontFeature.tabularFigures()]);
+    final lines = switch (badge) {
+      BufferBadge(:final length) => <Widget>[
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 9 * unit,
+              height: 9 * unit,
+              decoration: const BoxDecoration(color: _noteColor, shape: BoxShape.circle),
+            ),
+            SizedBox(width: 5 * unit),
+            Text('last ${formatRecordingTime(length)}', style: style(_noteColor, 17, FontWeight.bold)),
+          ]),
+        ],
+      RecordingBadge(:final length, :final cap) => <Widget>[
+          Text(formatRecordingTime(length), key: const ValueKey('recordTime'), style: style(_recordColor, 21, FontWeight.w800)),
+          SizedBox(height: 3 * unit),
+          Text('of ${formatRecordingTime(cap)}', style: style(_noteColor, 15, FontWeight.w600)),
+        ],
+      SavedBadge(:final length) => <Widget>[
+          Text('✓ Saved', key: const ValueKey('recordSaved'), style: style(_savedColor, 18, FontWeight.w800)),
+          SizedBox(height: 3 * unit),
+          Text('${formatRecordingTime(length)} clip', style: style(_noteColor, 15, FontWeight.w600)),
+        ],
+    };
+    return FittedBox(fit: BoxFit.scaleDown, child: Column(mainAxisSize: MainAxisSize.min, children: lines));
   }
 }
 

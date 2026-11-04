@@ -2,4 +2,6 @@
 <!-- downloaded app updates, shared with Android's installer (MainActivity installApk) -->
 <paths>
     <cache-path name="updates" path="updates/" />
+    <!-- recorded clips, for Share (MainActivity shareClip) -->
+    <files-path name="clips" path="clips/" />
 </paths>

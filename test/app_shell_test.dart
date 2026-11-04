@@ -11,7 +11,9 @@ import 'package:opview/selfdrive/ui/shell/status_bar.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:opview/services/recorder/recorder.dart';
 import 'golden/mock_ui_state.dart';
+import 'support/fake_recorder.dart';
 
 void _screen(WidgetTester tester, double w, double h) {
   tester.view.physicalSize = Size(w, h);
@@ -20,10 +22,10 @@ void _screen(WidgetTester tester, double w, double h) {
   addTearDown(tester.view.resetDevicePixelRatio);
 }
 
-Widget _shell(UIState state, AppSettings settings, {VoidCallback? onExit}) => MaterialApp(
+Widget _shell(UIState state, AppSettings settings, {VoidCallback? onExit, Recorder? recorder}) => MaterialApp(
       home: ListenableBuilder(
         listenable: settings,
-        builder: (context, _) => AppShell(uiState: state, settings: settings, onExit: onExit),
+        builder: (context, _) => AppShell(uiState: state, settings: settings, onExit: onExit, recorder: recorder),
       ),
     );
 
@@ -144,9 +146,88 @@ void main() {
     testWidgets('screens not built yet say so', (tester) async {
       _screen(tester, 1920, 1000);
       await tester.pumpWidget(_shell(_withDevice(), AppSettings()));
-      await tester.tap(find.byKey(const ValueKey('menu_gallery')));
+      await tester.tap(find.byKey(const ValueKey('menu_navigate')));
       await tester.pump();
-      expect(find.text('Gallery is coming in a later build'), findsOneWidget);
+      expect(find.text('Navigate is coming in a later build'), findsOneWidget);
+    });
+
+    group('Record and Gallery', () {
+      testWidgets('connected the first time: the explainer, then the buffer; Record runs a clip', (tester) async {
+        _screen(tester, 1920, 1000);
+        final settings = AppSettings();
+        final st = _withDevice()..isConnected = true;
+        final platform = FakeRecorderPlatform(dir: null);
+        final recorder = Recorder(platform: platform, settings: settings, uiState: st);
+        await tester.pumpWidget(_shell(st, settings, recorder: recorder));
+        await tester.pump();
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('recordExplainer')), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('explainerContinue')));
+        await tester.pumpAndSettle();
+        expect(settings.recordExplained, isTrue);
+        expect(platform.calls, contains('start'));
+        // the crop is everything right of the menu
+        expect(platform.crop, const Rect.fromLTWH(menuRailWidth, 0, 1920 - menuRailWidth, 1000));
+        expect(find.text('last 1:00'), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('menu_record')));
+        await tester.pump();
+        await tester.pump();
+        expect(recorder.recording, isTrue);
+        expect(find.text('of 5:00'), findsOneWidget);
+        expect(find.byKey(const ValueKey('recordTime')), findsOneWidget);
+        await tester.pumpWidget(const SizedBox());
+        recorder.dispose();
+      });
+
+      testWidgets('Not now: no buffer, and Record asks again', (tester) async {
+        _screen(tester, 1920, 1000);
+        final settings = AppSettings();
+        final st = _withDevice()..isConnected = true;
+        final platform = FakeRecorderPlatform(dir: null);
+        final recorder = Recorder(platform: platform, settings: settings, uiState: st);
+        await tester.pumpWidget(_shell(st, settings, recorder: recorder));
+        await tester.pump();
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('explainerNotNow')));
+        await tester.pumpAndSettle();
+        expect(platform.calls, isEmpty);
+        await tester.tap(find.byKey(const ValueKey('menu_record')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('recordExplainer')), findsOneWidget);
+        await tester.pumpWidget(const SizedBox());
+        recorder.dispose();
+      });
+
+      testWidgets('Gallery takes the camera area and pauses the recording; tapping it again goes back', (tester) async {
+        _screen(tester, 1920, 1000);
+        final settings = AppSettings()..recordExplained = true;
+        final st = _withDevice()..isConnected = true;
+        final platform = FakeRecorderPlatform(dir: null);
+        final recorder = Recorder(platform: platform, settings: settings, uiState: st);
+        await tester.pumpWidget(_shell(st, settings, recorder: recorder));
+        await tester.pumpAndSettle();
+        expect(recorder.state, RecordState.buffering);
+        await tester.tap(find.byKey(const ValueKey('menu_gallery')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('galleryView')), findsOneWidget);
+        expect(platform.paused, isTrue);
+        expect(find.byKey(const ValueKey('statusBar')), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('menu_gallery')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('galleryView')), findsNothing);
+        expect(platform.paused, isFalse);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+        recorder.dispose();
+      });
+
+      testWidgets('without a recorder Record says so', (tester) async {
+        _screen(tester, 1920, 1000);
+        await tester.pumpWidget(_shell(_withDevice(), AppSettings()));
+        await tester.tap(find.byKey(const ValueKey('menu_record')));
+        await tester.pump();
+        expect(find.text('Recording is not available'), findsOneWidget);
+      });
     });
 
     testWidgets('Exit asks first, and Cancel stays', (tester) async {

@@ -274,6 +274,12 @@ class _SettingsBody extends StatelessWidget {
         _choices<CameraMode>(CameraMode.values, settings.cameraMode, cameraModeLabel, settings.setCameraMode),
         _note('Auto switches to the wide camera at low speed while openpilot controls speed, as the comma '
             'does; each switch briefly restarts the video. Road and Wide never switch'),
+        _label('RECORDING · KEEP THE LAST'),
+        _choices<int>(recordBufferChoices, settings.recordBufferSeconds, recordBufferLabel, settings.setRecordBufferSeconds),
+        _note('Saved with the clip when you tap Record. Clips stop at 5:00. Off records only from the tap'),
+        _label('RECORDING · STORAGE LIMIT'),
+        _choices<int>(storageLimitChoices, settings.storageLimitGb, (gb) => '$gb GB', settings.setStorageLimitGb),
+        _note('Over the limit the oldest clips are removed; starred clips are kept'),
       ],
     );
   }

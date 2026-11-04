@@ -1,6 +1,8 @@
 package org.dragonpilot.opview
 
+import android.app.Activity
 import android.app.PictureInPictureParams
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -8,7 +10,11 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.media.projection.MediaProjectionManager
+import android.os.Handler
+import android.os.Looper
 import android.util.Rational
+import android.view.View
 import android.view.WindowManager
 import androidx.annotation.RequiresApi
 import androidx.core.content.FileProvider
@@ -23,6 +29,13 @@ class MainActivity: FlutterActivity() {
     // screen brightness and installing an app update
     private val SYSTEM_CHANNEL = "org.dragonpilot.opview/system"
     private var systemChannel: MethodChannel? = null
+
+    // Record (ScreenCapture, RecorderService)
+    private val RECORDER_CHANNEL = "org.dragonpilot.opview/recorder"
+    private var recorderChannel: MethodChannel? = null
+    private var pendingStart: MethodChannel.Result? = null
+    private val REQUEST_CAPTURE = 4101
+    private val main = Handler(Looper.getMainLooper())
 
     // shrink to a picture-in-picture window on Home; Dart turns this on while connected
     private var pipEnabled = false
@@ -80,6 +93,8 @@ class MainActivity: FlutterActivity() {
                 result.notImplemented()
             }
         }
+
+        setUpRecorder(MethodChannel(flutterEngine.dartExecutor.binaryMessenger, RECORDER_CHANNEL))
 
         val system = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SYSTEM_CHANNEL)
         systemChannel = system
@@ -147,6 +162,133 @@ class MainActivity: FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    // -- Record --
+
+    /** a rect from Dart (physical pixels inside the app's view) on the display */
+    private fun cropOnScreen(args: Map<*, *>): CropRect {
+        val loc = IntArray(2)
+        findViewById<View>(android.R.id.content)?.getLocationOnScreen(loc)
+        fun n(k: String) = (args[k] as? Number)?.toInt() ?: 0
+        return CropRect(n("x") + loc[0], n("y") + loc[1], n("w"), n("h"))
+    }
+
+    private fun setUpRecorder(channel: MethodChannel) {
+        recorderChannel = channel
+        CaptureHub.listener = object : CaptureListener {
+            override fun onClipSaved(path: String, startWallMs: Long, durationMs: Long, bufferedMs: Long) {
+                main.post {
+                    recorderChannel?.invokeMethod("clipSaved", mapOf(
+                        "path" to path, "startMs" to startWallMs, "durationMs" to durationMs, "bufferedMs" to bufferedMs,
+                    ))
+                }
+            }
+
+            override fun onClipFailed(message: String) {
+                main.post { recorderChannel?.invokeMethod("clipFailed", message) }
+            }
+        }
+        CaptureHub.onEnded = { recorderChannel?.invokeMethod("captureEnded", null) }
+
+        channel.setMethodCallHandler { call, result ->
+            val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+            when (call.method) {
+                // ask Android for the screen (once per launch), then keep [bufferMs] ready
+                "start" -> {
+                    CaptureHub.bufferMs = (args["bufferMs"] as? Number)?.toLong() ?: 60_000L
+                    CaptureHub.crop = cropOnScreen(args)
+                    val running = CaptureHub.capture
+                    if (running != null) {
+                        running.bufferMs = CaptureHub.bufferMs
+                        running.setCrop(CaptureHub.crop)
+                        result.success(true)
+                    } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP || pendingStart != null) {
+                        result.success(false)
+                    } else {
+                        pendingStart = result
+                        val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                        try {
+                            @Suppress("DEPRECATION")
+                            startActivityForResult(mpm.createScreenCaptureIntent(), REQUEST_CAPTURE)
+                        } catch (e: Exception) {
+                            pendingStart = null
+                            result.success(false)
+                        }
+                    }
+                }
+                "stop" -> {
+                    stopService(Intent(this, RecorderService::class.java))
+                    result.success(null)
+                }
+                "isCapturing" -> result.success(CaptureHub.capture != null)
+                "setBuffer" -> {
+                    val ms = (call.arguments as? Number)?.toLong() ?: 60_000L
+                    CaptureHub.bufferMs = ms
+                    CaptureHub.capture?.bufferMs = ms
+                    result.success(null)
+                }
+                "setCrop" -> {
+                    CaptureHub.crop = cropOnScreen(args)
+                    CaptureHub.capture?.setCrop(CaptureHub.crop)
+                    result.success(null)
+                }
+                "setPaused" -> {
+                    CaptureHub.capture?.paused = call.arguments as? Boolean ?: false
+                    result.success(null)
+                }
+                // returns how much of the clip is from before the tap (ms), or null without a capture
+                "startClip" -> result.success(CaptureHub.capture?.startClip())
+                "stopClip" -> {
+                    CaptureHub.capture?.stopClip()
+                    result.success(null)
+                }
+                "clipDir" -> {
+                    val dir = RecorderService.clipDir(this)
+                    dir.mkdirs()
+                    result.success(dir.absolutePath)
+                }
+                // hand a clip to another app (Files, a messenger...)
+                "share" -> {
+                    val path = call.arguments as? String
+                    try {
+                        val uri = FileProvider.getUriForFile(this, "$packageName.updates", File(path ?: ""))
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "video/mp4"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        startActivity(Intent.createChooser(send, "Share clip").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("share", e.message, null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_CAPTURE) return
+        val pending = pendingStart ?: return
+        pendingStart = null
+        if (resultCode != Activity.RESULT_OK || data == null) {
+            pending.success(false)
+            return
+        }
+        CaptureHub.onStarted = { ok -> main.post { pending.success(ok) } }
+        val intent = Intent(this, RecorderService::class.java)
+            .putExtra(RecorderService.EXTRA_RESULT, resultCode)
+            .putExtra(RecorderService.EXTRA_DATA, data)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+        } catch (e: Exception) {
+            CaptureHub.onStarted = null
+            pending.success(false)
         }
     }
 }

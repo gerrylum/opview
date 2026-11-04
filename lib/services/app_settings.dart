@@ -57,6 +57,17 @@ String cameraModeLabel(CameraMode m) => switch (m) { CameraMode.auto => 'Auto', 
 const _cameraModeKey = 'camera_mode';
 const _speedLimitKey = 'speed_limit_display';
 const _detailsOpenKey = 'details_open';
+const _recordBufferKey = 'record_buffer_s';
+const _storageLimitKey = 'record_storage_gb';
+const _recordExplainedKey = 'record_explained';
+
+/// Record's "Keep the last" choices, in seconds (0: off)
+const recordBufferChoices = [0, 30, 60, 120];
+
+/// Record's storage limit choices, in GB
+const storageLimitChoices = [5, 10, 20];
+
+String recordBufferLabel(int s) => switch (s) { 0 => 'Off', 30 => '30 s', 60 => '1 min', 120 => '2 min', _ => '$s s' };
 const _roadNameKey = 'show_road_name';
 const _brightnessKey = 'screen_brightness';
 
@@ -86,6 +97,15 @@ class AppSettings extends ChangeNotifier {
   /// the Details view is showing instead of the full camera view (remembered between runs)
   bool detailsOpen = false;
 
+  /// Record keeps this many seconds from before a tap (0: no buffer)
+  int recordBufferSeconds = 60;
+
+  /// over this many GB the oldest unstarred clips are removed
+  int storageLimitGb = 10;
+
+  /// the Record explainer has been shown and accepted once
+  bool recordExplained = false;
+
   /// read saved settings; unknown or missing values keep the defaults
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -108,6 +128,11 @@ class AppSettings extends ChangeNotifier {
     if (savedBrightness != null && savedBrightness >= 0) manualBrightness = brightness!;
     system.setAppBrightness(brightness);
     detailsOpen = prefs.getBool(_detailsOpenKey) ?? false;
+    final buffer = prefs.getInt(_recordBufferKey);
+    recordBufferSeconds = recordBufferChoices.contains(buffer) ? buffer! : 60;
+    final limit = prefs.getInt(_storageLimitKey);
+    storageLimitGb = storageLimitChoices.contains(limit) ? limit! : 10;
+    recordExplained = prefs.getBool(_recordExplainedKey) ?? false;
     notifyListeners();
   }
 
@@ -156,6 +181,30 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_detailsOpenKey, value);
+  }
+
+  Future<void> setRecordBufferSeconds(int value) async {
+    if (value == recordBufferSeconds) return;
+    recordBufferSeconds = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_recordBufferKey, value);
+  }
+
+  Future<void> setStorageLimitGb(int value) async {
+    if (value == storageLimitGb) return;
+    storageLimitGb = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_storageLimitKey, value);
+  }
+
+  Future<void> setRecordExplained(bool value) async {
+    if (value == recordExplained) return;
+    recordExplained = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_recordExplainedKey, value);
   }
 }
 
