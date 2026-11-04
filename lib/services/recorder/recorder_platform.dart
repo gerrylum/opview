@@ -1,7 +1,6 @@
 // the Android side of Record (MainActivity, RecorderService, ScreenCapture.kt)
 
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:flutter/services.dart';
 

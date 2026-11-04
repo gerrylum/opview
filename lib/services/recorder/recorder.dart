@@ -84,8 +84,10 @@ class Recorder extends ChangeNotifier {
   bool _starting = false;
   int _bufferSeconds;
 
-  Recorder({required this.platform, required this.settings, required this.uiState, DateTime Function()? clock})
-      : clock = clock ?? DateTime.now,
+  /// [store] replaces the clips folder on the head unit (tests)
+  Recorder({required this.platform, required this.settings, required this.uiState, DateTime Function()? clock, ClipStore? store})
+      : _store = store,
+        clock = clock ?? DateTime.now,
         log = DriveEventLog(clock: clock),
         _bufferSeconds = settings.recordBufferSeconds {
     _sub = platform.events.listen(_onEvent);

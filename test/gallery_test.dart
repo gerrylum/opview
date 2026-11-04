@@ -61,10 +61,9 @@ class FakePlayback extends ChangeNotifier implements ClipPlayback {
   Future<void> dispose() async => super.dispose();
 }
 
-/// let file reads and writes finish: each step waits on real IO, then runs on in the test's zone
+/// let the (in-memory) clip store's futures finish
 Future<void> _io(WidgetTester tester) async {
-  for (var i = 0; i < 8; i++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+  for (var i = 0; i < 3; i++) {
     await tester.pump();
   }
 }
@@ -128,37 +127,32 @@ void main() {
   });
 
   group('gallery', () {
-    late Directory dir;
     late FakeRecorderPlatform platform;
+    late MemoryClipStore store;
     late Recorder recorder;
     late FakePlayback playback;
 
     setUp(() async {
       SharedPreferences.setMockInitialValues({});
-      dir = await Directory.systemTemp.createTemp('gallery');
-      platform = FakeRecorderPlatform(dir: dir.path);
-      recorder = Recorder(platform: platform, settings: AppSettings(), uiState: UIState());
+      platform = FakeRecorderPlatform(dir: '/memory');
+      store = MemoryClipStore();
+      recorder = Recorder(platform: platform, settings: AppSettings(), uiState: UIState(), store: store);
       playback = FakePlayback();
-      final store = ClipStore(dir);
       final now = DateTime.now();
       for (final (i, alert, starred) in [(0, true, false), (1, false, true), (2, false, false)]) {
         final start = now.subtract(Duration(hours: i * 30));
-        final v = File('${dir.path}/${start.millisecondsSinceEpoch}.mp4');
-        await v.writeAsBytes(List.filled(1000 * (i + 1), 0));
         await store.save(Clip(
-          video: v,
+          video: File('/memory/${start.millisecondsSinceEpoch}.mp4'),
           start: start,
           duration: Duration(seconds: 60 + i * 30),
           buffered: const Duration(seconds: 60),
           starred: starred,
           events: alert ? const [DriveEvent(Duration(seconds: 70), DriveEventKind.alert)] : const [],
+          bytes: 1000 * (i + 1),
         ));
       }
     });
-    tearDown(() async {
-      recorder.dispose();
-      if (await dir.exists()) await dir.delete(recursive: true);
-    });
+    tearDown(() => recorder.dispose());
 
     Future<void> show(WidgetTester tester, {double w = 1770, double h = 916}) async {
       _screen(tester, w, h);
@@ -168,8 +162,6 @@ void main() {
       // the clips are read from disk
       await _io(tester);
     }
-
-    List<String> ids() => [for (final f in Directory(dir.path).listSync()) if (f.path.endsWith('.mp4')) f.uri.pathSegments.last];
 
     testWidgets('clips newest first, with alert, star, length and usage', (tester) async {
       await show(tester);
@@ -210,7 +202,7 @@ void main() {
       await tester.pump();
       await _io(tester);
       await tester.pumpAndSettle();
-      expect(ids().length, 2);
+      expect(store.clips.length, 2);
       expect(find.textContaining('2 clips'), findsOneWidget);
     });
 
@@ -244,9 +236,7 @@ void main() {
     });
 
     testWidgets('no clips yet', (tester) async {
-      for (final f in Directory(dir.path).listSync()) {
-        f.deleteSync();
-      }
+      store.clips.clear();
       await show(tester);
       expect(find.byKey(const ValueKey('galleryEmpty')), findsOneWidget);
     });
