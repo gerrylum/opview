@@ -56,7 +56,7 @@ String cameraModeLabel(CameraMode m) => switch (m) { CameraMode.auto => 'Auto', 
 
 const _cameraModeKey = 'camera_mode';
 const _speedLimitKey = 'speed_limit_display';
-const _collapsedKey = 'detailed_collapsed_panels';
+const _detailsOpenKey = 'details_open';
 const _roadNameKey = 'show_road_name';
 const _brightnessKey = 'screen_brightness';
 
@@ -83,8 +83,8 @@ class AppSettings extends ChangeNotifier {
   /// the last brightness set by hand, for the slider while Auto is on
   double manualBrightness = 0.6;
 
-  /// Detailed panels the driver has tapped shut, by name
-  final Set<String> collapsedPanels = {};
+  /// the Details view is showing instead of the full camera view (remembered between runs)
+  bool detailsOpen = false;
 
   /// read saved settings; unknown or missing values keep the defaults
   Future<void> load() async {
@@ -107,9 +107,7 @@ class AppSettings extends ChangeNotifier {
     brightness = savedBrightness == null || savedBrightness < 0 ? null : savedBrightness.clamp(minBrightness, 1.0).toDouble();
     if (savedBrightness != null && savedBrightness >= 0) manualBrightness = brightness!;
     system.setAppBrightness(brightness);
-    collapsedPanels
-      ..clear()
-      ..addAll(prefs.getStringList(_collapsedKey) ?? const []);
+    detailsOpen = prefs.getBool(_detailsOpenKey) ?? false;
     notifyListeners();
   }
 
@@ -152,12 +150,12 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> setShowRoadName(bool value) => setShows(DriveSection.roadName, value);
 
-  /// open a collapsed Detailed panel, or collapse an open one
-  Future<void> togglePanel(String name) async {
-    if (!collapsedPanels.remove(name)) collapsedPanels.add(name);
+  Future<void> setDetailsOpen(bool value) async {
+    if (value == detailsOpen) return;
+    detailsOpen = value;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_collapsedKey, collapsedPanels.toList()..sort());
+    await prefs.setBool(_detailsOpenKey, value);
   }
 }
 

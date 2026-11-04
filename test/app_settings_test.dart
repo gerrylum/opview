@@ -34,11 +34,11 @@ void main() {
   });
 
   group('AppSettings', () {
-    test('defaults: a 12 hour clock, the speed limit on Auto, every panel open', () {
+    test('defaults: a 12 hour clock, the speed limit on Auto, Details closed', () {
       final s = AppSettings();
       expect(s.clockMode, ClockMode.h12);
       expect(s.speedLimitDisplay, SpeedLimitDisplay.auto);
-      expect(s.collapsedPanels, isEmpty);
+      expect(s.detailsOpen, isFalse);
     });
 
     test('a clock setting saved by an older build is ignored', () async {
@@ -109,18 +109,14 @@ void main() {
       expect(st.showRoadName, isFalse);  // no name from the maps
     });
 
-    test('folded Detailed panels toggle and are remembered', () async {
+    test('whether Details is open is remembered', () async {
       SharedPreferences.setMockInitialValues({});
       final a = AppSettings();
       await a.load();
-      await a.togglePanel('lead');
-      await a.togglePanel('steering');
-      await a.togglePanel('steering');
-      expect(a.collapsedPanels, {'lead'});
-
+      await a.setDetailsOpen(true);
       final b = AppSettings();
       await b.load();
-      expect(b.collapsedPanels, {'lead'});
+      expect(b.detailsOpen, isTrue);
     });
   });
 

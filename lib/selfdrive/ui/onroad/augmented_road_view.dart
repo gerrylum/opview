@@ -8,6 +8,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:opview/common/transformations.dart';
+import 'package:opview/selfdrive/ui/details/details_view.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/selfdrive/ui/onroad/enhanced/enhanced_layout.dart';
 import 'package:opview/selfdrive/ui/onroad/pip_layout.dart';
@@ -35,6 +36,9 @@ class AugmentedRoadView extends StatefulWidget {
   // Android has shrunk the app to a picture-in-picture window: show PipLayout, no gestures
   final bool pip;
 
+  // the Details screen: the comma's figures in cards, the camera in a small window
+  final bool details;
+
   const AugmentedRoadView({
     super.key,
     required this.uiState,
@@ -44,6 +48,7 @@ class AugmentedRoadView extends StatefulWidget {
     this.settings,
     this.currentHost,
     this.pip = false,
+    this.details = false,
   });
 
   @override
@@ -80,6 +85,17 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
           child: Stack(
             fit: StackFit.expand,
             children: [
+              if (widget.details)
+                DetailsView(
+                  uiState: widget.uiState,
+                  cameraWindow: PipLayout(
+                    uiState: widget.uiState,
+                    speedLimitDisplay: speedLimitDisplay,
+                    frameFor: _fullScreenFrame,
+                    videoBuilder: _videoLayer,
+                  ),
+                )
+              else
               EnhancedLayout(
                 uiState: widget.uiState,
                 clockMode: settings?.clockMode ?? ClockMode.h12,

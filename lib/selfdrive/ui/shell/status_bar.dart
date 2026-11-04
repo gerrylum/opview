@@ -5,7 +5,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
-import 'package:opview/selfdrive/ui/onroad/detailed/detailed_layout.dart' show formatGear, networkBars;
+import 'package:opview/selfdrive/ui/details/details_format.dart' show formatGear, networkBars;
 import 'package:opview/selfdrive/ui/onroad/throttled.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';

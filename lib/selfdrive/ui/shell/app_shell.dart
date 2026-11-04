@@ -53,7 +53,10 @@ class AppShell extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              MenuRail(unit: unit, onSelect: (item) => _onMenu(context, item)),
+              MenuRail(
+                  unit: unit,
+                  active: settings.detailsOpen ? MenuItem.details : null,
+                  onSelect: (item) => _onMenu(context, item)),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -66,6 +69,7 @@ class AppShell extends StatelessWidget {
                         onSetManualHost: onSetManualHost,
                         currentHost: currentHost,
                         settings: settings,
+                        details: settings.detailsOpen,
                       ),
                     ),
                     if (settings.shows(DriveSection.statusBar))
@@ -87,8 +91,10 @@ class AppShell extends StatelessWidget {
             loadManualHost: loadManualHost, onSetManualHost: onSetManualHost, currentHost: currentHost);
       case MenuItem.exit:
         _confirmExit(context);
-      case MenuItem.navigate:
       case MenuItem.details:
+        // a toggle: tap again to go back to the driving view
+        settings.setDetailsOpen(!settings.detailsOpen);
+      case MenuItem.navigate:
       case MenuItem.record:
       case MenuItem.gallery:
         // not built yet: the redesign adds these one at a time

@@ -1,8 +1,7 @@
-// Detailed figures: the formatting and data behind the Details view (the Detailed
-// layout itself is gone; the Details view reuses these)
+// the figures behind the Details view: formatting, and the data they are read from
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:opview/selfdrive/ui/onroad/detailed/detailed_layout.dart';
+import 'package:opview/selfdrive/ui/details/details_format.dart';
 import 'package:opview/selfdrive/ui/onroad/top_row.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/impl/cereal_adapter.dart';
