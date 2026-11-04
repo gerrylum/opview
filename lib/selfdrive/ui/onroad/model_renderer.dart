@@ -28,6 +28,14 @@ const leadBoxWidth = 1.8;
 const leadBoxHeight = 1.5;
 const leadBoxDepth = 1.8;
 
+/// radarState's dRel is measured from the radar at the front of the car, but the view is
+/// drawn from the camera, this far behind it (openpilot radard RADAR_TO_CAMERA). Without
+/// it the box stands short of the lead car, in the gap in front of us
+const radarToCamera = 1.52;
+
+/// path outline width on a 1080 px tall view
+const pathEdgeWidth = 10.0;
+
 /// how urgent a lead car is, 0..1: closer and closing faster is higher.
 /// the same rule the stock chevron uses for how solid it is drawn
 double leadWarnLevel(double dRel, double vRel) {
@@ -243,7 +251,7 @@ class ModelRendererPainter extends CustomPainter {
         Color.lerp(pathEdgeNoThrottleColor, pathEdgeThrottleColor, state.throttleBlend.clamp(0.0, 1.0))!;
     final paint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = max(2.0, 6 * contentRect.height / 1080.0)
+      ..strokeWidth = max(3.0, pathEdgeWidth * contentRect.height / 1080.0)
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..shader = ui.Gradient.linear(
@@ -350,7 +358,9 @@ class ModelRendererPainter extends CustomPainter {
     final dRel = _leadNum(lead, 'dRel');
     final vRel = _leadNum(lead, 'vRel');
     final yRel = _leadNum(lead, 'yRel');
-    final idx = _getPathLengthIdx(pathX, dRel);
+    // where the lead's back is in the camera's frame; the box reaches forward from there
+    final back = dRel + radarToCamera;
+    final idx = _getPathLengthIdx(pathX, back);
     final zGround = ((idx < state.pathZ.length) ? state.pathZ[idx] : 0.0) + _pathOffsetZ;
 
     // corners in order round each face: top left, top right, bottom right, bottom left
@@ -359,8 +369,8 @@ class ModelRendererPainter extends CustomPainter {
     for (final corner in const [[-1.0, 1.0], [1.0, 1.0], [1.0, 0.0], [-1.0, 0.0]]) {
       final y = -yRel + corner[0] * leadBoxWidth / 2;
       final z = zGround - corner[1] * leadBoxHeight;
-      final n = _mapToScreen(dRel, y, z);
-      final f = _mapToScreen(dRel + leadBoxDepth, y, z);
+      final n = _mapToScreen(back, y, z);
+      final f = _mapToScreen(back + leadBoxDepth, y, z);
       if (n == null || f == null) return;
       near.add(n);
       far.add(f);

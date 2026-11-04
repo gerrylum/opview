@@ -47,6 +47,14 @@ String driveSectionLabel(DriveSection s) {
 }
 
 const _hiddenSectionsKey = 'hidden_sections';
+
+/// which comma camera to stream: Auto switches to the wide camera at low speed while
+/// openpilot controls speed, as the comma's own screen does; the others never switch
+enum CameraMode { auto, road, wide }
+
+String cameraModeLabel(CameraMode m) => switch (m) { CameraMode.auto => 'Auto', CameraMode.road => 'Road', CameraMode.wide => 'Wide' };
+
+const _cameraModeKey = 'camera_mode';
 const _speedLimitKey = 'speed_limit_display';
 const _collapsedKey = 'detailed_collapsed_panels';
 const _roadNameKey = 'show_road_name';
@@ -59,6 +67,7 @@ class AppSettings extends ChangeNotifier {
   /// the clock is always shown, in 12 hour time; no longer a setting
   ClockMode clockMode = ClockMode.h12;
   SpeedLimitDisplay speedLimitDisplay = SpeedLimitDisplay.auto;
+  CameraMode cameraMode = CameraMode.auto;
 
   /// sections of the driving screen turned off in Settings > Display; everything is on to start
   final Set<DriveSection> hiddenSections = {};
@@ -81,6 +90,7 @@ class AppSettings extends ChangeNotifier {
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     speedLimitDisplay = _byName(SpeedLimitDisplay.values, prefs.getString(_speedLimitKey), SpeedLimitDisplay.auto);
+    cameraMode = _byName(CameraMode.values, prefs.getString(_cameraModeKey), CameraMode.auto);
     hiddenSections.clear();
     final savedHidden = prefs.getStringList(_hiddenSectionsKey);
     if (savedHidden != null) {
@@ -109,6 +119,14 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_speedLimitKey, value.name);
+  }
+
+  Future<void> setCameraMode(CameraMode value) async {
+    if (value == cameraMode) return;
+    cameraMode = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_cameraModeKey, value.name);
   }
 
   /// [value] null: follow the head unit's brightness (Auto)

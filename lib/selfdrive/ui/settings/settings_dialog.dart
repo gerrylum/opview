@@ -270,6 +270,10 @@ class _SettingsBody extends StatelessWidget {
       children: [
         _label('COMMA DEVICE'),
         _deviceRow(),
+        _label('CAMERA'),
+        _choices<CameraMode>(CameraMode.values, settings.cameraMode, cameraModeLabel, settings.setCameraMode),
+        _note('Auto switches to the wide camera at low speed while openpilot controls speed, as the comma '
+            'does; each switch briefly restarts the video. Road and Wide never switch'),
       ],
     );
   }

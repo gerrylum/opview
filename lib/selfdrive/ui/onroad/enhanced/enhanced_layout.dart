@@ -76,7 +76,11 @@ const _alertStatusCritical = 2;
 const _pillColor = Color(0xB3141414);
 const _discColor = Color(0xE6101010);
 const _labelColor = HudColors.grey;
-const _blindSpotGlow = Color(0x8CFF9628);
+const _blindSpotColor = Color(0xFFFF9628);
+
+/// blind spot: the glow pulses this often, and each ripple takes this long to cross it
+const blindSpotPulse = Duration(milliseconds: 1400);
+const blindSpotRipples = 3;
 
 /// border around the screen, by engagement state
 Color enhancedBorderColor(UIStatus status) {
@@ -211,15 +215,7 @@ class EnhancedLayout extends StatelessWidget {
                 top: 0,
                 bottom: 0,
                 width: enhancedGlowWidth * unit,
-                child: const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                      colors: [_blindSpotGlow, Color(0x00FF9628)],
-                    ),
-                  ),
-                ),
+                child: const BlindSpotGlow(fromLeft: true),
               ),
             if (st.showBlindSpot && st.rightBlindspot)
               Positioned(
@@ -228,15 +224,7 @@ class EnhancedLayout extends StatelessWidget {
                 top: 0,
                 bottom: 0,
                 width: enhancedGlowWidth * unit,
-                child: const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.centerRight,
-                      end: Alignment.centerLeft,
-                      colors: [_blindSpotGlow, Color(0x00FF9628)],
-                    ),
-                  ),
-                ),
+                child: const BlindSpotGlow(fromLeft: false),
               ),
 
             if (shows(DriveSection.torque))
@@ -305,6 +293,100 @@ class EnhancedLayout extends StatelessWidget {
       );
     });
   }
+}
+
+// -- blind spot --
+
+/// a glow from the screen edge on the side where a car is in the blind spot: it pulses,
+/// and ripples roll in from the edge and fade as they go, so it catches the eye
+class BlindSpotGlow extends StatefulWidget {
+  final bool fromLeft;
+
+  const BlindSpotGlow({super.key, required this.fromLeft});
+
+  @override
+  State<BlindSpotGlow> createState() => _BlindSpotGlowState();
+}
+
+class _BlindSpotGlowState extends State<BlindSpotGlow> with SingleTickerProviderStateMixin {
+  late final AnimationController _anim = AnimationController(vsync: this, duration: blindSpotPulse)..repeat();
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: RepaintBoundary(
+        child: CustomPaint(painter: BlindSpotGlowPainter(fromLeft: widget.fromLeft, progress: _anim)),
+      ),
+    );
+  }
+}
+
+/// [progress] runs 0..1 over one pulse
+class BlindSpotGlowPainter extends CustomPainter {
+  final bool fromLeft;
+  final Animation<double> progress;
+
+  BlindSpotGlowPainter({required this.fromLeft, required this.progress}) : super(repaint: progress);
+
+  /// how strong the steady glow is at [t]: breathing between 0.35 and 0.65
+  static double glowAlpha(double t) => 0.5 + 0.15 * sin(2 * pi * t);
+
+  /// the ripples at [t]: where each one is (0 at the edge, 1 at the far side of the glow)
+  /// and how strong, fading as it travels in
+  static List<(double, double)> ripples(double t) {
+    final out = <(double, double)>[];
+    for (var i = 0; i < blindSpotRipples; i++) {
+      final phase = (t + i / blindSpotRipples) % 1.0;
+      out.add((phase, (1 - phase) * 0.7));
+    }
+    return out;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final t = progress.value;
+    final w = size.width, h = size.height;
+    final begin = fromLeft ? Alignment.centerLeft : Alignment.centerRight;
+    final end = fromLeft ? Alignment.centerRight : Alignment.centerLeft;
+    final rect = Offset.zero & size;
+
+    // the steady glow from the edge, breathing
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: begin,
+          end: end,
+          colors: [_blindSpotColor.withValues(alpha: glowAlpha(t)), _blindSpotColor.withValues(alpha: 0)],
+        ).createShader(rect),
+    );
+
+    // ripples: soft bright bands travelling inward from the edge
+    final band = w * 0.22;
+    for (final (pos, alpha) in ripples(t)) {
+      final centre = pos * w;
+      final x = fromLeft ? centre : w - centre;
+      final r = Rect.fromLTWH(x - band / 2, 0, band, h);
+      canvas.drawRect(
+        r,
+        Paint()
+          ..shader = LinearGradient(colors: [
+            _blindSpotColor.withValues(alpha: 0),
+            _blindSpotColor.withValues(alpha: alpha),
+            _blindSpotColor.withValues(alpha: 0),
+          ]).createShader(r),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(BlindSpotGlowPainter old) => old.fromLeft != fromLeft || old.progress != progress;
 }
 
 // -- road name tab --

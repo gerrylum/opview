@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
+import 'package:opview/services/app_settings.dart' show CameraMode;
 import 'package:opview/services/discovery.dart';
 import 'package:opview/services/transport.dart';
 import 'package:opview/services/adapter.dart';
@@ -251,23 +252,12 @@ class ConnectionManager {
     _connect();
   }
 
-  /// wide camera at low speed under openpilot longitudinal control, with speed hysteresis
-  /// (augmented_road_view.py:122-136)
+  /// which camera to stream (Settings > Comma); a change takes effect with the next message
+  CameraMode cameraMode = CameraMode.auto;
+
   void _switchStreamIfNeeded() {
-    String target;
-    if (_uiState.longitudinalControl) {
-      final vEgo = _uiState.vEgo;
-      if (vEgo < wideCamMaxSpeed) {
-        target = 'wideRoad';
-      } else if (vEgo > roadCamMinSpeed) {
-        target = 'road';
-      } else {
-        // hysteresis zone — keep current
-        return;
-      }
-    } else {
-      target = 'road';
-    }
+    final target = cameraTarget(cameraMode,
+        longitudinalControl: _uiState.longitudinalControl, vEgo: _uiState.vEgo, current: _streamType);
     if (target == _streamType) return;
     _streamType = target;
     _uiState.streamType = target;
@@ -435,5 +425,22 @@ class ConnectionManager {
     _deviceSub?.cancel();
     _discovery.dispose();
     await _transport.dispose();
+  }
+}
+
+/// the camera stream to show. Auto: the wide camera at low speed under openpilot
+/// longitudinal control, with speed hysteresis (augmented_road_view.py:122-136); Road and
+/// Wide never switch
+String cameraTarget(CameraMode mode, {required bool longitudinalControl, required double vEgo, required String current}) {
+  switch (mode) {
+    case CameraMode.road:
+      return 'road';
+    case CameraMode.wide:
+      return 'wideRoad';
+    case CameraMode.auto:
+      if (!longitudinalControl) return 'road';
+      if (vEgo < wideCamMaxSpeed) return 'wideRoad';
+      if (vEgo > roadCamMinSpeed) return 'road';
+      return current;  // in between: keep what is showing
   }
 }
