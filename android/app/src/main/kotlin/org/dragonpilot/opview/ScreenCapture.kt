@@ -43,6 +43,7 @@ private const val MAX_WIDTH = 1280
 private const val BIT_RATE = 4_000_000
 private const val FRAME_RATE = 30
 private const val KEYFRAME_S = 2
+private const val KEEP_ALIVE_MS = 100L
 
 /** a cropped region of the display, in physical pixels */
 data class CropRect(val x: Int, val y: Int, val w: Int, val h: Int)
@@ -81,6 +82,27 @@ class ScreenCapture(
     private var program = 0
     private var texId = 0
     private val texMatrix = FloatArray(16)
+
+    // frame times handed to the encoder: always later than the last one (µs apart at least)
+    private var lastPtsNs = 0L
+    private var lastDrawWallNs = 0L
+    private var haveFrame = false
+
+    // a still screen sends no frames, but segments need keyframes: redraw the last frame now and then
+    private val keepAlive = object : Runnable {
+        override fun run() {
+            if (!running) return
+            try {
+                val now = System.nanoTime()
+                if (haveFrame && !paused && now - lastDrawWallNs >= KEEP_ALIVE_MS * 1_000_000) {
+                    present(lastPtsNs + (now - lastDrawWallNs))
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "keep alive", e)
+            }
+            gl.postDelayed(this, KEEP_ALIVE_MS)
+        }
+    }
 
     private val segments = SegmentWriter(segmentDir).apply { setBuffer(bufferMs * 1000) }
 
@@ -139,7 +161,7 @@ class ScreenCapture(
     }
 
     /** start a clip with what is buffered; returns how much from before now it includes (ms) */
-    fun startClip(): Long = segments.startClip(nowUs(), bufferMs * 1000) / 1000
+    fun startClip(): Long = segments.startClip(bufferMs * 1000) / 1000
 
     fun stopClip() {
         segments.requestStop()
@@ -169,8 +191,11 @@ class ScreenCapture(
                 setInteger(MediaFormat.KEY_BIT_RATE, BIT_RATE)
                 setInteger(MediaFormat.KEY_FRAME_RATE, FRAME_RATE)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, KEYFRAME_S)
-                // the screen often stands still: repeat the last frame so keyframes keep coming
-                setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 1_000_000L / 10)
+                // no B-frames: every frame's time is later than the last, which the segment files and
+                // the join rely on (KEY_MAX_B_FRAMES, Android 10+; older encoders make none by default)
+                setInteger("max-bframes", 0)
+                // (no KEY_REPEAT_PREVIOUS_FRAME_AFTER: its made-up frame times could land after the next real
+                // frame's, and a segment file with a frame going back in time is lost. keepAlive redraws instead)
             }
             val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
             enc.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -196,6 +221,7 @@ class ScreenCapture(
             )
 
             drainThread = Thread({ drain(enc) }, "OPRivRecordDrain").apply { start() }
+            gl.postDelayed(keepAlive, KEEP_ALIVE_MS)
         } catch (e: Exception) {
             Log.e(TAG, "set up", e)
             listener.onClipFailed("Could not start recording: ${e.message}")
@@ -214,18 +240,27 @@ class ScreenCapture(
 
     private fun onFrame() {
         val st = texture ?: return
-        val e = egl ?: return
         try {
             st.updateTexImage()
             if (paused || !running) return
             st.getTransformMatrix(texMatrix)
-            GLES20.glViewport(0, 0, outW, outH)
-            draw()
-            e.setPresentationTime(st.timestamp)
-            e.swapBuffers()
+            haveFrame = true
+            present(st.timestamp)
         } catch (ex: Exception) {
             Log.w(TAG, "frame", ex)
         }
+    }
+
+    /** draw the latest screen frame into the encoder at [ptsNs], kept strictly after the last frame */
+    private fun present(ptsNs: Long) {
+        val e = egl ?: return
+        val pts = maxOf(ptsNs, lastPtsNs + 1_000_000)  // at least 1 ms on
+        GLES20.glViewport(0, 0, outW, outH)
+        draw()
+        e.setPresentationTime(pts)
+        e.swapBuffers()
+        lastPtsNs = pts
+        lastDrawWallNs = System.nanoTime()
     }
 
     private fun draw() {
@@ -426,8 +461,10 @@ private class SegmentWriter(private val dir: File) {
     private var counter = 0
 
     private var bufferUs = 0L
+    private var latestUs = -1L     // the newest frame written (encoder time); clip times are all in it
     private var clipFromUs = -1L   // first frame time of the running clip, or -1
     private var clipTapUs = 0L
+    private var startAtNextFrame = false
     private var stopRequested = false
 
     val recording: Boolean get() = synchronized(lock) { clipFromUs >= 0 }
@@ -437,15 +474,24 @@ private class SegmentWriter(private val dir: File) {
     }
 
     /** returns how much the clip includes from before now (µs) */
-    fun startClip(nowUs: Long, bufferUs: Long): Long = synchronized(lock) {
+    fun startClip(bufferUs: Long): Long = synchronized(lock) {
         this.bufferUs = bufferUs
         if (clipFromUs >= 0) return@synchronized clipTapUs - clipFromUs
-        // the oldest segment still kept covers the buffer (pruning keeps one that starts before it)
+        // now, in the encoder's own time (its frame times need not share a clock with the app's);
+        // nothing encoded yet: the clip starts at the first frame
+        stopRequested = false
+        if (latestUs < 0) {
+            // nothing encoded yet (the capture has just started): the clip starts with the first frame
+            clipFromUs = 0
+            clipTapUs = 0
+            startAtNextFrame = true
+            return@synchronized 0L
+        }
+        val nowUs = latestUs
         // from the buffer's length back (the segment holding that moment is kept whole), or as far as there is
         val first = closed.firstOrNull()?.firstUs ?: current?.firstUs ?: nowUs
         clipFromUs = maxOf(first, nowUs - bufferUs).coerceAtMost(nowUs)
         clipTapUs = nowUs
-        stopRequested = false
         clipTapUs - clipFromUs
     }
 
@@ -455,13 +501,23 @@ private class SegmentWriter(private val dir: File) {
 
     fun abandonClip() = synchronized(lock) {
         clipFromUs = -1
+        startAtNextFrame = false
         stopRequested = false
     }
 
     /** write one encoded frame; returns a clip when one has just ended */
     fun write(buf: ByteBuffer, info: MediaCodec.BufferInfo): FinishedClip? = synchronized(lock) {
         val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
+        // a frame time that doesn't move on would make MediaMuxer give up on the whole segment file
+        val last = current?.takeIf { it.samples > 0 }?.lastUs
+        if (last != null && info.presentationTimeUs <= last) info.presentationTimeUs = last + 1
         val t = info.presentationTimeUs
+        latestUs = t
+        if (startAtNextFrame) {
+            clipFromUs = t
+            clipTapUs = t
+            startAtNextFrame = false
+        }
         var finished: FinishedClip? = null
         // the 5 minute cap
         if (clipFromUs >= 0 && t - clipFromUs >= MAX_CLIP_US) stopRequested = true
@@ -472,21 +528,31 @@ private class SegmentWriter(private val dir: File) {
             current = openSegment(t)
         }
         val seg = current ?: return@synchronized finished  // no keyframe yet
-        buf.position(info.offset)
-        buf.limit(info.offset + info.size)
-        seg.muxer.writeSampleData(seg.track, buf, info)
-        seg.lastUs = t
-        seg.samples++
+        try {
+            buf.position(info.offset)
+            buf.limit(info.offset + info.size)
+            seg.muxer.writeSampleData(seg.track, buf, info)
+            seg.lastUs = t
+            seg.samples++
+        } catch (e: Exception) {
+            Log.w(TAG, "write sample", e)
+        }
         finished
     }
 
     private fun openSegment(t: Long): Segment? {
         val fmt = format ?: return null
         val file = File(dir, "seg_${counter++}.mp4")
-        val muxer = MediaMuxer(file.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        val track = muxer.addTrack(fmt)
-        muxer.start()
-        return Segment(file, muxer, track, t)
+        return try {
+            val muxer = MediaMuxer(file.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            val track = muxer.addTrack(fmt)
+            muxer.start()
+            Segment(file, muxer, track, t)
+        } catch (e: Exception) {
+            Log.w(TAG, "open segment", e)
+            file.delete()
+            null
+        }
     }
 
     private fun closeCurrent() {
@@ -511,8 +577,7 @@ private class SegmentWriter(private val dir: File) {
         val parts = closed.filter { it.lastUs >= clipFromUs }
         held.addAll(parts.map { it.file })
         val first = parts.firstOrNull()?.firstUs ?: clipFromUs
-        val nowUs = ScreenCapture.nowUs()
-        val startWallMs = System.currentTimeMillis() - (nowUs - first) / 1000
+        val startWallMs = System.currentTimeMillis() - (latestUs - first).coerceAtLeast(0) / 1000
         val clip = FinishedClip(parts.map { it.file }, parts.map { it.firstUs }, startWallMs, (clipTapUs - first).coerceAtLeast(0))
         clipFromUs = -1
         stopRequested = false
