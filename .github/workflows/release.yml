@@ -75,7 +75,17 @@ jobs:
         id: changelog
         run: |
           prev_tag=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || echo "")
-          if [ -n "$prev_tag" ]; then
+          # an annotated tag's message is the release notes (the app shows its first four "- " lines);
+          # otherwise the commit subjects since the last tag
+          notes=""
+          # the checkout can leave the tag as a plain pointer to the commit: fetch the tag itself
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME" || true
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = "tag" ]; then
+            notes=$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME")
+          fi
+          if [ -n "$notes" ]; then
+            log="$notes"
+          elif [ -n "$prev_tag" ]; then
             log=$(git log --pretty=format:'- %s' "${prev_tag}..${GITHUB_REF_NAME}^")
           else
             log="- Initial release"
