@@ -44,6 +44,45 @@ void main() {
     expect(enhancedUnit(const Size(1024, 768)), closeTo(1024 / 536, 1e-9));
   });
 
+  group('torque bar easing', () {
+    double shown(WidgetTester tester) => tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((p) => p.painter)
+        .whereType<EnhancedTorqueBarPainter>()
+        .single
+        .value;
+
+    Widget bar(double value) => MaterialApp(
+          home: EnhancedTorqueBar(value: value, status: UIStatus.engaged, unit: 1),
+        );
+
+    testWidgets('a new value is eased in over the next frames, not jumped to', (tester) async {
+      await tester.pumpWidget(bar(0));
+      expect(shown(tester), 0);
+      await tester.pumpWidget(bar(0.8));
+      await tester.pump(const Duration(milliseconds: 16));  // the ticker's first frame
+      await tester.pump(const Duration(milliseconds: 16));
+      final early = shown(tester);
+      expect(early, greaterThan(0));
+      expect(early, lessThan(0.3));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(shown(tester), greaterThan(early));
+      expect(shown(tester), lessThan(0.8));
+      await tester.pumpAndSettle();  // caught up: the ticker stops
+      expect(shown(tester), 0.8);
+    });
+
+    testWidgets('it follows a value that changes again while it is moving', (tester) async {
+      await tester.pumpWidget(bar(0));
+      await tester.pumpWidget(bar(0.6));
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.pump(const Duration(milliseconds: 40));
+      await tester.pumpWidget(bar(-0.4));
+      await tester.pumpAndSettle();
+      expect(shown(tester), -0.4);
+    });
+  });
+
   group('torqueBarValue', () {
     test('torque control: the car output torque, sign flipped', () {
       final s = UIState();

@@ -22,6 +22,7 @@
 
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:opview/common/transformations.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
@@ -234,13 +235,11 @@ class EnhancedLayout extends StatelessWidget {
               ),
 
             if (shows(DriveSection.torque))
-              CustomPaint(
-                painter: EnhancedTorqueBarPainter(
-                  value: st.torqueBarValue,
-                  status: st.status,
-                  unit: unit,
-                  laneGuard: LaneGuardBar.of(st),
-                ),
+              EnhancedTorqueBar(
+                value: st.torqueBarValue,
+                status: st.status,
+                unit: unit,
+                laneGuard: LaneGuardBar.of(st),
               ),
 
             // road name, a tab hanging from the top border
@@ -853,6 +852,76 @@ class EnhancedCornerClock extends StatelessWidget {
 }
 
 // -- torque bar (mici/onroad/torque_bar.py) --
+
+/// how quickly the torque bar follows the steering: a first-order filter with this time
+/// constant, as mici's torque_bar.py does (FirstOrderFilter, rc 0.1 s)
+const torqueBarSmoothing = Duration(milliseconds: 100);
+
+/// the torque bar, eased towards [value] every display frame. The comma's figures arrive with
+/// the model, about 20 times a second and often a few at once over the stream, so drawing
+/// each as it comes makes the bar jump in steps; this moves it a little every frame instead,
+/// and stops ticking once it has caught up
+class EnhancedTorqueBar extends StatefulWidget {
+  final double value;  // -1..1
+  final UIStatus status;
+  final double unit;
+  final LaneGuardBar? laneGuard;
+
+  const EnhancedTorqueBar({super.key, required this.value, required this.status, required this.unit, this.laneGuard});
+
+  @override
+  State<EnhancedTorqueBar> createState() => _EnhancedTorqueBarState();
+}
+
+class _EnhancedTorqueBarState extends State<EnhancedTorqueBar> with SingleTickerProviderStateMixin {
+  late double _shown = widget.value;
+  late final Ticker _ticker = createTicker(_tick);
+  Duration _last = Duration.zero;
+
+  @override
+  void didUpdateWidget(EnhancedTorqueBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.value != _shown && !_ticker.isActive) {
+      _last = Duration.zero;
+      _ticker.start();
+    }
+  }
+
+  void _tick(Duration elapsed) {
+    final dt = (elapsed - _last).inMicroseconds / 1e6;
+    _last = elapsed;
+    if (dt <= 0) return;
+    final rc = torqueBarSmoothing.inMicroseconds / 1e6;
+    final target = widget.value;
+    var next = _shown + (target - _shown) * (dt / (rc + dt));
+    if ((target - next).abs() < 0.002) {
+      next = target;
+      _ticker.stop();
+    }
+    setState(() => _shown = next);
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // its own layer: repainting it every frame leaves the rest of the screen alone
+    return RepaintBoundary(
+      child: CustomPaint(
+        painter: EnhancedTorqueBarPainter(
+          value: _shown,
+          status: widget.status,
+          unit: widget.unit,
+          laneGuard: widget.laneGuard,
+        ),
+      ),
+    );
+  }
+}
 
 /// arc along the bottom of the screen: grey track, filled from the centre towards
 /// the side the car is steering, turning orange near the limit.
