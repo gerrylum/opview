@@ -33,6 +33,18 @@ def dashes():
         out.append(f'<rect x="{512 - w / 2:.1f}" y="{y}" width="{w}" height="{h}" rx="{w / 4:.1f}" fill="#8BE04E"/>')
     return '\n'.join(out)
 
+def comma(opacity=0.2):
+    """a faint comma rising behind the mountains like a moon: a round head, its tail sweeping down
+    and left into the dip where the road meets the horizon"""
+    cx, cy, r = 512, 396, 54
+    tail = (f'M{cx + r},{cy} '
+            f'C{cx + r},{cy + 58} {cx + 20},{cy + 104} {cx - 46},{cy + 124} '
+            f'C{cx - 4},{cy + 92} {cx + 10},{cy + 66} {cx + 6},{cy + r - 2} Z')
+    glyph = f'<circle cx="{cx}" cy="{cy}" r="{r}"/><path d="{tail}"/>'
+    return (f'<g fill="#E4F5E8" opacity="{opacity * 0.9}" filter="url(#commaGlow)">{glyph}</g>'
+            f'<g fill="#E4F5E8" opacity="{opacity}">{glyph}</g>')
+
+
 def path():
     """openpilot's model path: a blue band up the middle of the road, narrowing and fading into the
     distance, under the centre line"""
@@ -81,6 +93,7 @@ def svg(background=True, wordmark=False, size=1024, shift=None, radius=230):
   <linearGradient id="pathGlow" x1="0" y1="{VP[1]}" x2="0" y2="{BOTTOM}" gradientUnits="userSpaceOnUse">
     <stop offset="0" stop-color="#3D8BFF" stop-opacity="0"/><stop offset="1" stop-color="#3D8BFF" stop-opacity=".7"/></linearGradient>
   <filter id="pathBlur" x="-30%" y="-10%" width="160%" height="120%"><feGaussianBlur stdDeviation="10"/></filter>
+  <filter id="commaGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="16"/></filter>
   <filter id="neon" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="9"/></filter>
   <clipPath id="view">
     <circle cx="{CX}" cy="{CY}" r="{DISC}"/>
@@ -93,6 +106,7 @@ def svg(background=True, wordmark=False, size=1024, shift=None, radius=230):
 <g clip-path="url(#below)">
  <g clip-path="url(#view)">
   <rect x="0" y="0" width="1024" height="{VP[1]}" fill="url(#sky)"/>
+  {comma()}
   <path d="{mountains}" fill="#0A0B0A"/>
   <rect x="0" y="{VP[1]}" width="1024" height="{BOTTOM - VP[1]}" fill="url(#ground)"/>
   {shoulders}{faint}
