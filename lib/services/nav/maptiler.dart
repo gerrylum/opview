@@ -26,7 +26,8 @@ const hasMapKey = mapTilerKey != '';
 /// the geocoding request for [query], ranked near [lat], [lon] when known
 Uri geocodingUri(String query, {double? lat, double? lon, String key = mapTilerKey}) => Uri.https(
       'api.maptiler.com',
-      '/geocoding/${Uri.encodeComponent(query.trim())}.json',
+      // Uri.https encodes the path itself; a slash would split it
+      '/geocoding/${query.trim().replaceAll('/', ' ')}.json',
       {
         'key': key,
         'autocomplete': 'true',

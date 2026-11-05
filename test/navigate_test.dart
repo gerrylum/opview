@@ -28,7 +28,7 @@ void _screen(WidgetTester tester, double w, double h) {
 
 /// a truck on the 5 in Tustin, routing to Costco
 UIState _routing() {
-  final st = createMockUIState();
+  final st = createMockUIState()..isMetric = false;
   st.applyGps({'latitude': 33.7175, 'longitude': -117.8311, 'bearingDeg': 45.0, 'speed': 20.0, 'hasFix': true});
   st.applyOpviewParams({'NavigationEnabled': true, 'NavDestination': {'latitude': _costco.lat, 'longitude': _costco.lon}});
   st.applyNavInstruction({
@@ -239,6 +239,7 @@ void main() {
 
     testWidgets('search, pick: the destination goes to the comma, the card waits for its route', (tester) async {
       final st = createMockUIState()
+        ..isMetric = false
         ..applyGps({'latitude': 33.7175, 'longitude': -117.8311, 'bearingDeg': 45.0, 'speed': 20.0, 'hasFix': true})
         ..applyOpviewParams({'NavigationEnabled': true});
       await show(tester, st);

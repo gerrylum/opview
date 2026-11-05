@@ -137,6 +137,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('section_steering')));
       await tester.pumpAndSettle();
+      // the list grew: scroll back up to the close button
+      await tester.ensureVisible(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
       await tester.tap(find.byIcon(Icons.close));
       await tester.pumpAndSettle();
       expect(settings.shows(DriveSection.steering), isFalse);

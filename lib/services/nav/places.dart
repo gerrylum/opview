@@ -42,11 +42,11 @@ double distanceMetres(double lat1, double lon1, double lat2, double lon2) {
 String formatNavDistance(double metres, bool metric) {
   if (metric) {
     if (metres < 1000) return '${(metres / 10).round() * 10} m';
-    return '${(metres / 1000).toStringAsFixed(metres < 10000 ? 1 : 0)} km';
+    return '${(metres / 1000).toStringAsFixed(metres < 100000 ? 1 : 0)} km';
   }
   final miles = metres / 1609.344;
   if (miles < 0.1) return '${(metres * 3.28084 / 50).round() * 50} ft';
-  return '${miles.toStringAsFixed(miles < 10 ? 1 : 0)} mi';
+  return '${miles.toStringAsFixed(miles < 100 ? 1 : 0)} mi';
 }
 
 /// "19 min", "1 h 5 min"
