@@ -282,7 +282,7 @@ class ScreenCapture(
         Thread({
             try {
                 val out = File(clipDir, "${clip.startWallMs}.mp4")
-                val durationUs = joinSegments(clip.files, out)
+                val durationUs = joinSegments(clip.files, clip.startsUs, out)
                 writeThumbnail(out, File(clipDir, "${clip.startWallMs}.jpg"))
                 listener.onClipSaved(out.absolutePath, clip.startWallMs, durationUs / 1000, clip.bufferedUs / 1000)
             } catch (e: Exception) {
@@ -402,8 +402,8 @@ private class Egl(surface: Surface) {
     }
 }
 
-/** a clip ready to be joined */
-class FinishedClip(val files: List<File>, val startWallMs: Long, val bufferedUs: Long)
+/** a clip ready to be joined: its segment files and when each one starts (encoder time, µs) */
+class FinishedClip(val files: List<File>, val startsUs: List<Long>, val startWallMs: Long, val bufferedUs: Long)
 
 private class Segment(val file: File, val muxer: MediaMuxer, val track: Int, val firstUs: Long) {
     var lastUs = firstUs
@@ -513,7 +513,7 @@ private class SegmentWriter(private val dir: File) {
         val first = parts.firstOrNull()?.firstUs ?: clipFromUs
         val nowUs = ScreenCapture.nowUs()
         val startWallMs = System.currentTimeMillis() - (nowUs - first) / 1000
-        val clip = FinishedClip(parts.map { it.file }, startWallMs, (clipTapUs - first).coerceAtLeast(0))
+        val clip = FinishedClip(parts.map { it.file }, parts.map { it.firstUs }, startWallMs, (clipTapUs - first).coerceAtLeast(0))
         clipFromUs = -1
         stopRequested = false
         return clip
@@ -547,18 +547,23 @@ private class SegmentWriter(private val dir: File) {
     }
 }
 
-/** copy the samples of [parts] one after the other into [out]; returns the length (µs) */
-fun joinSegments(parts: List<File>, out: File): Long {
+/**
+ * copy the samples of [parts] one after the other into [out]; returns the length (µs).
+ * Each segment file's own times start again at 0 (MediaMuxer makes them relative to its first
+ * frame), so each part is placed at [startsUs] (when the encoder made its first frame) from the
+ * first part. Samples are copied in the order they are stored and never dropped: dropping one
+ * leaves the frames that refer to it garbled until the next keyframe.
+ */
+fun joinSegments(parts: List<File>, startsUs: List<Long>, out: File): Long {
     require(parts.isNotEmpty()) { "no video" }
     val muxer = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
     var track = -1
-    var firstUs = -1L
-    var lastUs = 0L
-    var wrote = false
+    var endUs = 0L       // the latest time written so far
+    var frameUs = 33_333L
     val buf = ByteBuffer.allocateDirect(4 * 1024 * 1024)
     val info = MediaCodec.BufferInfo()
     try {
-        for (part in parts) {
+        for ((i, part) in parts.withIndex()) {
             val ex = MediaExtractor()
             try {
                 ex.setDataSource(part.absolutePath)
@@ -568,22 +573,23 @@ fun joinSegments(parts: List<File>, out: File): Long {
                     track = muxer.addTrack(ex.getTrackFormat(0))
                     muxer.start()
                 }
+                // where this part goes: its own start, but never on top of what is already written
+                var offsetUs = (startsUs.getOrNull(i) ?: 0L) - startsUs[0]
+                if (i > 0 && offsetUs <= endUs) offsetUs = endUs + frameUs
+                var partFirst = -1L
+                var prev = -1L
                 while (true) {
                     val size = ex.readSampleData(buf, 0)
                     if (size < 0) break
                     val t = ex.sampleTime
-                    if (firstUs < 0) firstUs = t
-                    // segments come from one encoder, so their times already run on; skip any overlap
-                    val rel = t - firstUs
-                    if (wrote && rel <= lastUs) {
-                        ex.advance()
-                        continue
-                    }
+                    if (partFirst < 0) partFirst = t
+                    if (prev >= 0 && t > prev) frameUs = minOf(t - prev, 200_000L)
+                    prev = t
+                    val at = offsetUs + (t - partFirst)
                     val flags = if (ex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
-                    info.set(0, size, rel, flags)
+                    info.set(0, size, at, flags)
                     muxer.writeSampleData(track, buf, info)
-                    lastUs = rel
-                    wrote = true
+                    endUs = maxOf(endUs, at)
                     ex.advance()
                 }
             } finally {
@@ -598,7 +604,7 @@ fun joinSegments(parts: List<File>, out: File): Long {
         out.delete()
         throw IllegalStateException("no video")
     }
-    return lastUs
+    return endUs
 }
 
 /** a frame from 1 s in (or the first) as the Gallery's thumbnail; missing is fine */
