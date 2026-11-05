@@ -44,6 +44,9 @@ class WebRTCTransport implements Transport {
   }
 
   @override
+  Future<bool> send(String message) => _client.send(message);
+
+  @override
   Future<void> close() async {
     _clientStateSub?.cancel();
     _clientStateSub = null;

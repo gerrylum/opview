@@ -9,6 +9,7 @@
 //   5. reconnect on failure
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
@@ -366,6 +367,14 @@ class ConnectionManager {
   }
 
   /// set (or clear with null/empty) the manual host, then reconnect
+  /// route the comma to [lat], [lon] (navd plans it), or clear the destination with null.
+  /// webrtcd answers with navDestinationResult (UIState.navDestinationError)
+  Future<bool> sendNavDestination((double, double)? dest) {
+    _uiState.navDestinationError = null;
+    final data = dest == null ? null : {'latitude': dest.$1, 'longitude': dest.$2};
+    return _transport.send(jsonEncode({'type': 'navDestination', 'data': data}));
+  }
+
   Future<void> setManualHost(String? host) async {
     final prefs = await SharedPreferences.getInstance();
     final trimmed = host?.trim() ?? '';

@@ -15,6 +15,8 @@ dependencies:
   connectivity_plus: ^7.0.0
   shared_preferences: ^2.3.0
   video_player: ^2.10.0  # the Gallery's clip player
+  flutter_map: ^8.0.0    # Navigate's map (MapTiler tiles)
+  latlong2: ^0.9.1
 
 dev_dependencies:
   flutter_test:

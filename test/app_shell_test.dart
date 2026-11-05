@@ -143,12 +143,12 @@ void main() {
       expect(find.byType(EnhancedSteeringPills), findsNothing);
     });
 
-    testWidgets('screens not built yet say so', (tester) async {
+    testWidgets('Navigate without a connection to send to says so', (tester) async {
       _screen(tester, 1920, 1000);
       await tester.pumpWidget(_shell(_withDevice(), AppSettings()));
       await tester.tap(find.byKey(const ValueKey('menu_navigate')));
       await tester.pump();
-      expect(find.text('Navigate is coming in a later build'), findsOneWidget);
+      expect(find.text('Navigate is not available'), findsOneWidget);
     });
 
     group('Record and Gallery', () {
@@ -215,6 +215,42 @@ void main() {
         await tester.tap(find.byKey(const ValueKey('menu_gallery')));
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('galleryView')), findsNothing);
+        expect(platform.paused, isFalse);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+        recorder.dispose();
+      });
+
+      testWidgets('Navigate takes the camera area, is highlighted, pauses recording; Start goes back', (tester) async {
+        _screen(tester, 1920, 1000);
+        final settings = AppSettings()..recordExplained = true;
+        final st = _withDevice()..isConnected = true;
+        final platform = FakeRecorderPlatform(dir: null);
+        final recorder = Recorder(platform: platform, settings: settings, uiState: st);
+        await tester.pumpWidget(MaterialApp(
+          home: ListenableBuilder(
+            listenable: settings,
+            builder: (context, _) => AppShell(
+              uiState: st,
+              settings: settings,
+              recorder: recorder,
+              sendNavDestination: (_) async => true,
+            ),
+          ),
+        ));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('menu_navigate')));
+        await tester.pump();
+        expect(find.byKey(const ValueKey('navigateView')), findsOneWidget);
+        expect(tester.widget<MenuRail>(find.byType(MenuRail)).active, MenuItem.navigate);
+        expect(platform.paused, isTrue);
+        // the Gallery replaces it
+        await tester.tap(find.byKey(const ValueKey('menu_gallery')));
+        await tester.pump();
+        expect(find.byKey(const ValueKey('navigateView')), findsNothing);
+        expect(find.byKey(const ValueKey('galleryView')), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('menu_gallery')));
+        await tester.pump();
         expect(platform.paused, isFalse);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());

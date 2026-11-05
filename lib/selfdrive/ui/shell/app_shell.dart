@@ -10,11 +10,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:opview/selfdrive/ui/gallery/clip_playback.dart';
 import 'package:opview/selfdrive/ui/gallery/gallery_view.dart';
+import 'package:opview/selfdrive/ui/navigate/navigate_view.dart';
 import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
 import 'package:opview/selfdrive/ui/shell/menu_rail.dart';
 import 'package:opview/selfdrive/ui/shell/status_bar.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
+import 'package:opview/services/nav/maptiler.dart';
 import 'package:opview/services/recorder/recorder.dart';
 
 const shellRefWidth = 1920.0;
@@ -37,6 +39,16 @@ class AppShell extends StatefulWidget {
   /// plays a clip in the Gallery; replaceable in tests
   final ClipPlaybackFactory playback;
 
+  /// Navigate: sends a destination to the comma (ConnectionManager.sendNavDestination);
+  /// without it Navigate says it is unavailable
+  final SendDestination? sendNavDestination;
+
+  /// Navigate's search; MapTiler unless replaced (tests)
+  final PlaceSearch? placeSearch;
+
+  /// Navigate's map tiles (off in tests)
+  final bool mapTiles;
+
   /// leaves the app; replaceable in tests
   final VoidCallback? onExit;
 
@@ -50,6 +62,9 @@ class AppShell extends StatefulWidget {
     this.currentHost,
     this.recorder,
     this.playback = videoPlayerPlayback,
+    this.sendNavDestination,
+    this.placeSearch,
+    this.mapTiles = true,
     this.onExit,
   });
 
@@ -68,6 +83,7 @@ RecordBadge? recordBadge(Recorder? r) {
 
 class _AppShellState extends State<AppShell> {
   bool _galleryOpen = false;
+  bool _navigateOpen = false;
   bool _wasConnected = false;
   bool _explaining = false;
 
@@ -134,6 +150,7 @@ class _AppShellState extends State<AppShell> {
       return;
     }
     if (_galleryOpen) _setGallery(false);
+    if (_navigateOpen) _setNavigate(false);
     if (!r.recording && !await _explained()) return;
     await r.toggle();
     final error = r.lastError;
@@ -144,8 +161,19 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _setGallery(bool open) {
-    setState(() => _galleryOpen = open);
-    recorder?.setCameraHidden(open);
+    setState(() {
+      _galleryOpen = open;
+      if (open) _navigateOpen = false;
+    });
+    recorder?.setCameraHidden(_galleryOpen || _navigateOpen);
+  }
+
+  void _setNavigate(bool open) {
+    setState(() {
+      _navigateOpen = open;
+      if (open) _galleryOpen = false;
+    });
+    recorder?.setCameraHidden(_galleryOpen || _navigateOpen);
   }
 
   void _note(String text) {
@@ -174,7 +202,9 @@ class _AppShellState extends State<AppShell> {
           final crop = Rect.fromLTWH(railW * dpr, 0, (constraints.maxWidth - railW) * dpr, constraints.maxHeight * dpr);
           WidgetsBinding.instance.addPostFrameCallback((_) => r.setCrop(crop));
         }
-        final active = _galleryOpen ? MenuItem.gallery : (settings.detailsOpen ? MenuItem.details : null);
+        final active = _navigateOpen
+            ? MenuItem.navigate
+            : (_galleryOpen ? MenuItem.gallery : (settings.detailsOpen ? MenuItem.details : null));
         return MediaQuery(
           data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
           child: Row(
@@ -191,9 +221,9 @@ class _AppShellState extends State<AppShell> {
                   children: [
                     Expanded(
                       child: Stack(fit: StackFit.expand, children: [
-                        // kept while the Gallery is open, so the video does not restart
+                        // kept while the Gallery or Navigate is open, so the video does not restart
                         Offstage(
-                          offstage: _galleryOpen,
+                          offstage: _galleryOpen || _navigateOpen,
                           child: AugmentedRoadView(
                             uiState: uiState,
                             videoRenderer: widget.videoRenderer,
@@ -205,6 +235,16 @@ class _AppShellState extends State<AppShell> {
                           ),
                         ),
                         if (_galleryOpen && r != null) GalleryView(recorder: r, unit: unit, playback: widget.playback),
+                        if (_navigateOpen && widget.sendNavDestination != null)
+                          NavigateView(
+                            uiState: uiState,
+                            settings: settings,
+                            unit: unit,
+                            send: widget.sendNavDestination!,
+                            onClose: () => _setNavigate(false),
+                            search: widget.placeSearch,
+                            tiles: widget.mapTiles && hasMapKey,
+                          ),
                       ]),
                     ),
                     if (settings.shows(DriveSection.statusBar))
@@ -228,28 +268,27 @@ class _AppShellState extends State<AppShell> {
         _confirmExit(context);
       case MenuItem.details:
         // a toggle: tap again to go back to the driving view
-        if (_galleryOpen) {
+        if (_galleryOpen || _navigateOpen) {
           _setGallery(false);
+          _setNavigate(false);
           settings.setDetailsOpen(true);
         } else {
           settings.setDetailsOpen(!settings.detailsOpen);
         }
       case MenuItem.record:
         _record();
+      case MenuItem.navigate:
+        if (widget.sendNavDestination == null) {
+          _note('Navigate is not available');
+        } else {
+          _setNavigate(!_navigateOpen);
+        }
       case MenuItem.gallery:
         if (recorder == null) {
           _note('Gallery is not available');
         } else {
           _setGallery(!_galleryOpen);
         }
-      case MenuItem.navigate:
-        // not built yet: the redesign adds these one at a time
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(SnackBar(
-            content: Text('${menuItemLabel(item)} is coming in a later build'),
-            duration: const Duration(seconds: 2),
-          ));
     }
   }
 

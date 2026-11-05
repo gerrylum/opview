@@ -48,9 +48,13 @@ jobs:
         run: echo "BUILD_NUMBER=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
 
       - name: Build APK
+        # Navigate's map and search (the MapTiler key, restricted to OPRivView's User-Agent)
+        env:
+          MAPTILER_KEY: ${{ secrets.MAPTILER_KEY }}
         run: |
           flutter build apk --release --target-platform android-arm64 --build-number "$BUILD_NUMBER" \
-            --dart-define=OPVIEW_BUILD="${GITHUB_REF_NAME}-${GITHUB_SHA::7}"
+            --dart-define=OPVIEW_BUILD="${GITHUB_REF_NAME}-${GITHUB_SHA::7}" \
+            --dart-define=MAPTILER_KEY="$MAPTILER_KEY"
 
       - uses: actions/upload-artifact@v7
         with:

@@ -25,6 +25,7 @@ import 'package:flutter/material.dart';
 import 'package:opview/common/transformations.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
+import 'package:opview/selfdrive/ui/navigate/turn_banner.dart';
 import 'package:opview/selfdrive/ui/onroad/enhanced/lane_guard_bar.dart';
 import 'package:opview/selfdrive/ui/onroad/exp_button.dart';
 import 'package:opview/selfdrive/ui/onroad/hud_renderer.dart';
@@ -264,8 +265,14 @@ class EnhancedLayout extends StatelessWidget {
                 driver: shows(DriveSection.driver),
                 confidence: shows(DriveSection.confidence)),
 
-            // steering readout, bottom left
-            if (shows(DriveSection.steering))
+            // navigating: the next turn under the speed row, and a small map where the steering readout goes
+            if (st.navigating && shows(DriveSection.turnBanner))
+              Positioned(left: edge, top: hudBottom + 8 * unit, child: TurnBanner(uiState: st, unit: unit)),
+            if (st.navigating && shows(DriveSection.miniMap))
+              Positioned(left: edge, bottom: edge, child: MiniMap(uiState: st, unit: unit)),
+
+            // steering readout, bottom left (the mini map takes its place while navigating)
+            if (shows(DriveSection.steering) && !(st.navigating && shows(DriveSection.miniMap)))
               Positioned(
                 left: edge,
                 bottom: edge,

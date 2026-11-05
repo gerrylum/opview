@@ -221,6 +221,32 @@ class UIState extends ChangeNotifier {
   /// openpilot has driven the throttle and brakes at least once (carControl.longActive)
   bool longActiveSeen = false;
 
+  // Navigate: where the truck is (gpsLocationExternal), navd's route (navRoute) and next turn (navInstruction)
+  bool gpsSeen = false;
+  bool gpsFix = false;
+  double gpsLat = 0.0, gpsLon = 0.0;
+  double gpsBearing = 0.0;   // degrees clockwise from north, held while nearly stopped
+  double gpsSpeed = 0.0;     // m/s
+  double gpsAccuracy = 0.0;  // m
+
+  bool navValid = false;     // navd has a route and sent an instruction
+  String navPrimary = '', navSecondary = '';
+  String navManeuverType = '', navManeuverModifier = '';
+  double navManeuverDistance = 0.0, navDistanceRemaining = 0.0, navTimeRemaining = 0.0;
+  DateTime? navInstructionAt;
+
+  /// navd's route as (lat, lon), thinned by webrtcd; empty without a route
+  List<(double, double)> navRoute = const [];
+
+  /// the comma's Navigation setting (navd only runs with it on); null before opviewParams has said
+  bool? navigationEnabled;
+
+  /// where navd is routing to (the comma's NavDestination), or null
+  (double, double)? navDestination;
+
+  /// the comma's answer to the last destination we sent: null while none, '' when it took it
+  String? navDestinationError;
+
   // carControlSP.laneGuard — EVPilot's lane guard (comma: selfdrive/controls/lib/lane_guard.py).
   // Comma branches without it never send it, and the torque bar stays plain
   bool laneGuardSeen = false;
@@ -479,6 +505,14 @@ class UIState extends ChangeNotifier {
     // car make and flags (carParams is only published every ~50 s)
     brand = data['CarBrand'] as String? ?? brand;
     carFlags = (data['CarFlags'] as num?)?.toInt() ?? carFlags;
+    final navOn = data['NavigationEnabled'];
+    if (navOn is bool) navigationEnabled = navOn;
+    if (data.containsKey('NavDestination')) {
+      final d = data['NavDestination'];
+      navDestination = d is Map && d['latitude'] is num && d['longitude'] is num
+          ? ((d['latitude'] as num).toDouble(), (d['longitude'] as num).toDouble())
+          : null;
+    }
     final opLong = data['OpenpilotLongitudinalControl'];
     if (opLong is bool) opLongitudinalControl = opLong;
     // no notify — picked up on next modelV2
@@ -556,6 +590,54 @@ class UIState extends ChangeNotifier {
     accelCommand = (data['actuators']?['accel'] as num?)?.toDouble() ?? 0.0;
     targetSteeringAngleDeg = (data['actuators']?['steeringAngleDeg'] as num?)?.toDouble() ?? 0.0;
   }
+
+  void applyGps(Map<String, dynamic> data) {
+    final lat = (data['latitude'] as num?)?.toDouble(), lon = (data['longitude'] as num?)?.toDouble();
+    final fix = data['hasFix'] as bool? ?? (lat != null && lon != null && (lat != 0 || lon != 0));
+    gpsSeen = true;
+    gpsFix = fix && lat != null && lon != null;
+    if (!gpsFix) return;
+    gpsLat = lat!;
+    gpsLon = lon!;
+    gpsSpeed = (data['speed'] as num?)?.toDouble() ?? 0.0;
+    gpsAccuracy = (data['horizontalAccuracy'] as num?)?.toDouble() ?? 0.0;
+    // the bearing wanders when stopped: keep the last one below walking speed
+    final bearing = (data['bearingDeg'] as num?)?.toDouble();
+    if (bearing != null && gpsSpeed > 1.5) gpsBearing = bearing;
+  }
+
+  void applyNavInstruction(Map<String, dynamic> data, {required bool valid}) {
+    navValid = valid;
+    navInstructionAt = DateTime.now();
+    if (!valid) return;
+    navPrimary = data['maneuverPrimaryText'] as String? ?? '';
+    navSecondary = data['maneuverSecondaryText'] as String? ?? '';
+    navManeuverType = data['maneuverType'] as String? ?? '';
+    navManeuverModifier = data['maneuverModifier'] as String? ?? '';
+    navManeuverDistance = (data['maneuverDistance'] as num?)?.toDouble() ?? 0.0;
+    navDistanceRemaining = (data['distanceRemaining'] as num?)?.toDouble() ?? 0.0;
+    navTimeRemaining = (data['timeRemaining'] as num?)?.toDouble() ?? 0.0;
+  }
+
+  /// [[lat, lon], ...] from webrtcd's opview_slim, or navd's own [{latitude, longitude}, ...]
+  void applyNavRoute(Map<String, dynamic> data) {
+    final out = <(double, double)>[];
+    for (final c in (data['coordinates'] as List? ?? const [])) {
+      if (c is List && c.length >= 2 && c[0] is num && c[1] is num) {
+        out.add(((c[0] as num).toDouble(), (c[1] as num).toDouble()));
+      } else if (c is Map && c['latitude'] is num && c['longitude'] is num) {
+        out.add(((c['latitude'] as num).toDouble(), (c['longitude'] as num).toDouble()));
+      }
+    }
+    navRoute = out;
+  }
+
+  void applyNavDestinationResult(Map<String, dynamic> data) {
+    navDestinationError = data['ok'] == true ? '' : (data['error'] as String? ?? 'The comma refused the destination');
+  }
+
+  /// a route is being followed: the comma has a destination and navd sent a turn
+  bool get navigating => navDestination != null && navValid;
 
   void applyCarControlSP(Map<String, dynamic> data) {
     final lg = data['laneGuard'];

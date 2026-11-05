@@ -1,8 +1,11 @@
 // app settings — viewer-side choices that live on this device, not on the comma
 // stored with shared_preferences
 
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
+import 'package:opview/services/nav/places.dart';
 import 'package:opview/services/system_service.dart' as system;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -22,7 +25,7 @@ String speedLimitDisplayLabel(SpeedLimitDisplay d) {
 }
 
 /// the parts of the driving screen that can be shown or hidden (Settings > Display)
-enum DriveSection { speed, roadName, driver, confidence, steering, lead, torque, statusBar }
+enum DriveSection { speed, roadName, driver, confidence, steering, lead, torque, turnBanner, miniMap, statusBar }
 
 /// what each section is called in the settings menu, in the order it lists them
 String driveSectionLabel(DriveSection s) {
@@ -41,6 +44,10 @@ String driveSectionLabel(DriveSection s) {
       return 'Lead car details';
     case DriveSection.torque:
       return 'Torque bar';
+    case DriveSection.turnBanner:
+      return 'Turn banner (navigating)';
+    case DriveSection.miniMap:
+      return 'Map (navigating)';
     case DriveSection.statusBar:
       return 'Status bar';
   }
@@ -58,6 +65,9 @@ const _cameraModeKey = 'camera_mode';
 const _speedLimitKey = 'speed_limit_display';
 const _detailsOpenKey = 'details_open';
 const _recordBufferKey = 'record_buffer_s';
+const _navHomeKey = 'nav_home';
+const _navWorkKey = 'nav_work';
+const _navRecentsKey = 'nav_recents';
 const _storageLimitKey = 'record_storage_gb';
 const _recordExplainedKey = 'record_explained';
 
@@ -106,6 +116,11 @@ class AppSettings extends ChangeNotifier {
   /// the Record explainer has been shown and accepted once
   bool recordExplained = false;
 
+  /// Navigate's saved places
+  Place? navHome;
+  Place? navWork;
+  List<Place> navRecents = const [];
+
   /// read saved settings; unknown or missing values keep the defaults
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -133,6 +148,9 @@ class AppSettings extends ChangeNotifier {
     final limit = prefs.getInt(_storageLimitKey);
     storageLimitGb = storageLimitChoices.contains(limit) ? limit! : 10;
     recordExplained = prefs.getBool(_recordExplainedKey) ?? false;
+    navHome = _place(prefs.getString(_navHomeKey));
+    navWork = _place(prefs.getString(_navWorkKey));
+    navRecents = (prefs.getStringList(_navRecentsKey) ?? const []).map(_place).whereType<Place>().toList();
     notifyListeners();
   }
 
@@ -199,12 +217,58 @@ class AppSettings extends ChangeNotifier {
     await prefs.setInt(_storageLimitKey, value);
   }
 
+  /// [place] null clears it
+  Future<void> setNavHome(Place? place) async {
+    navHome = place;
+    notifyListeners();
+    await _savePlace(_navHomeKey, place);
+  }
+
+  Future<void> setNavWork(Place? place) async {
+    navWork = place;
+    notifyListeners();
+    await _savePlace(_navWorkKey, place);
+  }
+
+  /// a destination was picked: first in the recents
+  Future<void> addNavRecent(Place place) async {
+    navRecents = addRecent(navRecents, place);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_navRecentsKey, [for (final p in navRecents) jsonEncode(p.toJson())]);
+  }
+
+  Future<void> clearNavRecents() async {
+    navRecents = const [];
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_navRecentsKey);
+  }
+
+  Future<void> _savePlace(String key, Place? place) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (place == null) {
+      await prefs.remove(key);
+    } else {
+      await prefs.setString(key, jsonEncode(place.toJson()));
+    }
+  }
+
   Future<void> setRecordExplained(bool value) async {
     if (value == recordExplained) return;
     recordExplained = value;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_recordExplainedKey, value);
+  }
+}
+
+Place? _place(String? json) {
+  if (json == null) return null;
+  try {
+    return Place.fromJson(jsonDecode(json));
+  } catch (_) {
+    return null;
   }
 }
 

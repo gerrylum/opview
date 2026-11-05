@@ -158,7 +158,7 @@ void main() {
       expect(SpeedLimitDisplay.values.map(speedLimitDisplayLabel).toList(), ['Auto', 'Always', 'Off']);
       expect(DriveSection.values.map(driveSectionLabel).toList(), [
         'Speed and MAX', 'Road name', 'Driver monitoring', 'Confidence ball',
-        'Steering details', 'Lead car details', 'Torque bar', 'Status bar',
+        'Steering details', 'Lead car details', 'Torque bar', 'Turn banner (navigating)', 'Map (navigating)', 'Status bar',
       ]);
     });
 

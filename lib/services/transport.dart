@@ -26,6 +26,9 @@ abstract class Transport {
   /// Connect to a host
   Future<void> connect(String host, {String camera = 'road'});
 
+  /// send one message to the comma over the data channel; false when not connected
+  Future<bool> send(String message);
+
   /// Close current connection
   Future<void> close();
 

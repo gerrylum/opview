@@ -120,6 +120,7 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
                 onSetManualHost: _connectionManager.setManualHost,
                 currentHost: () => _connectionManager.host,
                 recorder: _recorder,
+                sendNavDestination: _connectionManager.sendNavDestination,
               ),
       ),
     );

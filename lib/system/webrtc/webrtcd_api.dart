@@ -26,6 +26,9 @@ const bridgeServicesOut = [
   'onroadEvents',
   'driverMonitoringState',  // Enhanced layout: driver monitoring icon
   'carControlSP',           // EVPilot lane guard on the torque bar
+  'gpsLocationExternal',    // Navigate: where the truck is
+  'navInstruction',         // Navigate: navd's next turn
+  'navRoute',               // Navigate: navd's route
 ];
 
 // names used before openpilot renamed these services

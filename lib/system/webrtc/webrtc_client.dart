@@ -95,6 +95,18 @@ class WebRTCClient {
     return _cleanup();
   }
 
+  /// send a message to webrtcd (e.g. navDestination); false when the channel is not open
+  Future<bool> send(String text) async {
+    final dc = _dataChannel;
+    if (dc == null || dc.state != RTCDataChannelState.RTCDataChannelOpen) return false;
+    try {
+      await dc.send(RTCDataChannelMessage(text));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// listen on data channel for cereal messages
   void _setupDataChannel(RTCDataChannel dc) {
     dc.onMessage = (msg) {

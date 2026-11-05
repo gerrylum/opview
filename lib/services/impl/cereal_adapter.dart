@@ -63,6 +63,11 @@ class CerealAdapter implements TelemetryAdapter {
         return false;
       }
       final data = payload as Map<String, dynamic>?;
+      // navd marks the instruction not valid when it has no route
+      if (type == 'navInstruction' && data != null) {
+        state.applyNavInstruction(data, valid: json['valid'] as bool? ?? true);
+        return false;
+      }
 
       if (type == null || data == null) return false;
 
@@ -124,6 +129,15 @@ class CerealAdapter implements TelemetryAdapter {
         return false;
       case 'carControlSP':
         state.applyCarControlSP(data);
+        return false;
+      case 'gpsLocationExternal':
+        state.applyGps(data);
+        return false;
+      case 'navRoute':
+        state.applyNavRoute(data);
+        return false;
+      case 'navDestinationResult':
+        state.applyNavDestinationResult(data);
         return false;
       case 'selfdriveStateSP':
         state.applySelfdriveStateSP(data);
