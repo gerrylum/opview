@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Android + iOS app icons from assets/logo.png"""
+"""Generate Android + iOS app icons from assets/logo.png (and logo_foreground.png); scripts/make_logo.py draws both"""
 
 import os
 import sys
@@ -18,6 +18,8 @@ if not os.path.exists(SRC):
     sys.exit(1)
 
 src = Image.open(SRC).convert("RGBA")
+FG = os.path.join(ROOT, "assets", "logo_foreground.png")
+fg = Image.open(FG).convert("RGBA") if os.path.exists(FG) else None
 
 # Android mipmap icons
 android_sizes = {
@@ -36,13 +38,17 @@ for folder, size in android_sizes.items():
     resized = src.resize((size, size), Image.LANCZOS)
     resized.save(os.path.join(path, "ic_launcher.png"))
 
-    # adaptive foreground (108dp canvas, 72dp safe zone)
+    # adaptive foreground (108dp canvas): assets/logo_foreground.png is already laid out on it
+    # (scripts/make_logo.py); otherwise the whole logo in the 72dp middle
     adaptive_size = int(size * 108 / 48)
-    canvas = Image.new("RGBA", (adaptive_size, adaptive_size), (0, 0, 0, 0))
-    icon_size = int(size * 72 / 48)
-    icon = src.resize((icon_size, icon_size), Image.LANCZOS)
-    offset = (adaptive_size - icon_size) // 2
-    canvas.paste(icon, (offset, offset), icon)
+    if fg is not None:
+        canvas = fg.resize((adaptive_size, adaptive_size), Image.LANCZOS)
+    else:
+        canvas = Image.new("RGBA", (adaptive_size, adaptive_size), (0, 0, 0, 0))
+        icon_size = int(size * 72 / 48)
+        icon = src.resize((icon_size, icon_size), Image.LANCZOS)
+        offset = (adaptive_size - icon_size) // 2
+        canvas.paste(icon, (offset, offset), icon)
     canvas.save(os.path.join(path, "ic_launcher_foreground.png"))
 
 # adaptive icon XML (Android 8.0+)
@@ -61,7 +67,7 @@ os.makedirs(values_path, exist_ok=True)
 with open(os.path.join(values_path, "colors.xml"), "w") as f:
     f.write('<?xml version="1.0" encoding="utf-8"?>\n')
     f.write('<resources>\n')
-    f.write('    <color name="ic_launcher_background">#000000</color>\n')
+    f.write('    <color name="ic_launcher_background">#0F1110</color>\n')  # the logo's own dark
     f.write('</resources>\n')
 
 print("Android icons generated")

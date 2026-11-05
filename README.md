@@ -52,6 +52,7 @@ except OSError:
 
 ```
 ├── assets/
+│   ├── logo.svg                           # the icon as a vector (scripts/make_logo.py)
 │   └── logo.png                           # Source icon (generates all app icons)
 ├── scripts/
 │   ├── build.sh                           # Build script (Android/iOS)
