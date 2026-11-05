@@ -33,6 +33,16 @@ def dashes():
         out.append(f'<rect x="{512 - w / 2:.1f}" y="{y}" width="{w}" height="{h}" rx="{w / 4:.1f}" fill="#8BE04E"/>')
     return '\n'.join(out)
 
+def path():
+    """openpilot's model path: a blue band up the middle of the road, narrowing and fading into the
+    distance, under the centre line"""
+    yb, w = BOTTOM, 230            # its width where it leaves the icon
+    band = (f'M{VP[0] - 1.5},{VP[1] + 4} L{VP[0] + 1.5},{VP[1] + 4} '
+            f'L{VP[0] + w / 2},{yb} L{VP[0] - w / 2},{yb} Z')
+    return (f'<path d="{band}" fill="url(#pathGlow)" filter="url(#pathBlur)"/>'
+            f'<path d="{band}" fill="url(#pathFill)"/>')
+
+
 def svg(background=True, wordmark=False, size=1024, shift=None, radius=230):
     SHIFT = (0 if wordmark else 52) if shift is None else shift
     yb = BOTTOM
@@ -65,6 +75,12 @@ def svg(background=True, wordmark=False, size=1024, shift=None, radius=230):
     <stop offset="0" stop-color="#101011"/><stop offset="1" stop-color="#2C2D2F"/></linearGradient>
   <linearGradient id="ringGrey" x1="0" y1="{CY - GREY_R}" x2="0" y2="{CY + GREY_R}" gradientUnits="userSpaceOnUse">
     <stop offset="0" stop-color="#4A4B4E"/><stop offset="1" stop-color="#2A2B2D"/></linearGradient>
+  <linearGradient id="pathFill" x1="0" y1="{VP[1]}" x2="0" y2="{BOTTOM}" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#4FA3FF" stop-opacity="0"/><stop offset=".35" stop-color="#4FA3FF" stop-opacity=".55"/>
+    <stop offset="1" stop-color="#3D8BFF" stop-opacity=".85"/></linearGradient>
+  <linearGradient id="pathGlow" x1="0" y1="{VP[1]}" x2="0" y2="{BOTTOM}" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#3D8BFF" stop-opacity="0"/><stop offset="1" stop-color="#3D8BFF" stop-opacity=".7"/></linearGradient>
+  <filter id="pathBlur" x="-30%" y="-10%" width="160%" height="120%"><feGaussianBlur stdDeviation="10"/></filter>
   <filter id="neon" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="9"/></filter>
   <clipPath id="view">
     <circle cx="{CX}" cy="{CY}" r="{DISC}"/>
@@ -82,6 +98,7 @@ def svg(background=True, wordmark=False, size=1024, shift=None, radius=230):
   {shoulders}{faint}
   <path d="{road}" fill="url(#asphalt)"/>
   {lines}
+  {path()}
   {dashes()}
  </g>
 </g>

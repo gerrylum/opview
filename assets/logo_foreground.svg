@@ -13,6 +13,12 @@
     <stop offset="0" stop-color="#101011"/><stop offset="1" stop-color="#2C2D2F"/></linearGradient>
   <linearGradient id="ringGrey" x1="0" y1="88" x2="0" y2="792" gradientUnits="userSpaceOnUse">
     <stop offset="0" stop-color="#4A4B4E"/><stop offset="1" stop-color="#2A2B2D"/></linearGradient>
+  <linearGradient id="pathFill" x1="0" y1="492" x2="0" y2="840" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#4FA3FF" stop-opacity="0"/><stop offset=".35" stop-color="#4FA3FF" stop-opacity=".55"/>
+    <stop offset="1" stop-color="#3D8BFF" stop-opacity=".85"/></linearGradient>
+  <linearGradient id="pathGlow" x1="0" y1="492" x2="0" y2="840" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#3D8BFF" stop-opacity="0"/><stop offset="1" stop-color="#3D8BFF" stop-opacity=".7"/></linearGradient>
+  <filter id="pathBlur" x="-30%" y="-10%" width="160%" height="120%"><feGaussianBlur stdDeviation="10"/></filter>
   <filter id="neon" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="9"/></filter>
   <clipPath id="view">
     <circle cx="512" cy="440" r="300"/>
@@ -30,6 +36,7 @@
   <path d="M512,492 L244,840 L-120,840 Z" fill="url(#shoulder)"/><path d="M512,492 L780,840 L1144,840 Z" fill="url(#shoulder)"/><path d="M512,492 L55,840 L65,840 Z" fill="#6E6F72"/><path d="M512,492 L959,840 L969,840 Z" fill="#6E6F72"/>
   <path d="M511,492 L513,492 L774,840 L250,840 Z" fill="url(#asphalt)"/>
   <path d="M512,492 L241,840 L259,840 Z" fill="#E8E8E8"/><path d="M512,492 L765,840 L783,840 Z" fill="#E8E8E8"/>
+  <path d="M510.5,496 L513.5,496 L627.0,840 L397.0,840 Z" fill="url(#pathGlow)" filter="url(#pathBlur)"/><path d="M510.5,496 L513.5,496 L627.0,840 L397.0,840 Z" fill="url(#pathFill)"/>
   <rect x="510.8" y="500" width="2.5" height="3" rx="0.6" fill="#8BE04E"/>
 <rect x="510.5" y="512" width="3" height="5" rx="0.8" fill="#8BE04E"/>
 <rect x="510.0" y="528" width="4" height="8" rx="1.0" fill="#8BE04E"/>
