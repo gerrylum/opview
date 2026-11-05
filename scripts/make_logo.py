@@ -36,10 +36,11 @@ def dashes():
 def comma(opacity=0.2):
     """a faint comma rising behind the mountains like a moon: a round head, its tail sweeping down
     and left into the dip where the road meets the horizon"""
-    cx, cy, r = 512, 396, 54
+    cx, cy, r = 512, 366, 66
+    k = r / 54  # the tail was drawn for a head of 54
     tail = (f'M{cx + r},{cy} '
-            f'C{cx + r},{cy + 58} {cx + 20},{cy + 104} {cx - 46},{cy + 124} '
-            f'C{cx - 4},{cy + 92} {cx + 10},{cy + 66} {cx + 6},{cy + r - 2} Z')
+            f'C{cx + r},{cy + 58 * k} {cx + 20 * k},{cy + 104 * k} {cx - 46 * k},{cy + 124 * k} '
+            f'C{cx - 4 * k},{cy + 92 * k} {cx + 10 * k},{cy + 66 * k} {cx + 6 * k},{cy + r - 2 * k} Z')
     glyph = f'<circle cx="{cx}" cy="{cy}" r="{r}"/><path d="{tail}"/>'
     return (f'<g fill="#E4F5E8" opacity="{opacity * 0.9}" filter="url(#commaGlow)">{glyph}</g>'
             f'<g fill="#E4F5E8" opacity="{opacity}">{glyph}</g>')
