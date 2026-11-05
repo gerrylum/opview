@@ -85,7 +85,7 @@ class AppShell extends StatefulWidget {
 /// what Record shows on the rail now
 RecordBadge? recordBadge(Recorder? r) {
   if (r == null) return null;
-  if (r.recording) return RecordingBadge(r.clipLength, maxClipLength);
+  if (r.recording) return RecordingBadge(r.clipLength, maxClipLength, paused: r.paused);
   if (r.showsSaved) return SavedBadge(r.savedLength ?? Duration.zero);
   if (r.state == RecordState.buffering) return BufferBadge(r.buffer);
   return null;

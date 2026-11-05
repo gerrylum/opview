@@ -296,6 +296,19 @@ void main() {
         expect(find.byKey(const ValueKey('settingsPage')), findsNothing);
         expect(platform.paused, isFalse);
         expect(recorder.recording, isTrue);
+        expect(find.byKey(const ValueKey('recordPaused')), findsNothing);
+        expect(find.text('of 5:00'), findsOneWidget);
+        // a page opened mid-clip: the rail says the clip is paused, under its time
+        await tester.tap(find.byKey(const ValueKey('menu_settings')));
+        await tester.pump();
+        await tester.pump();
+        expect(find.byKey(const ValueKey('recordPaused')), findsOneWidget);
+        expect(find.text('paused'), findsOneWidget);
+        expect(find.text('of 5:00'), findsNothing);
+        expect(find.byKey(const ValueKey('recordTime')), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('settingsDone')));
+        await tester.pump();
+        expect(find.byKey(const ValueKey('recordPaused')), findsNothing);
         await tester.pumpWidget(const SizedBox());
         recorder.dispose();
       });

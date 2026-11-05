@@ -143,7 +143,11 @@ class Recorder extends ChangeNotifier {
     if (what == _coveredBy) return;
     _coveredBy = what;
     _applyPause();
+    notifyListeners();  // the rail's "paused" under the clip time
   }
+
+  /// the camera area is covered (or the app is away), so the clip shows "Recording paused"
+  bool get paused => _coveredBy != null || !_foreground;
 
   void _applyPause() {
     if (state == RecordState.off) return;

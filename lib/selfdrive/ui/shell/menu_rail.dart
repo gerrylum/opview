@@ -16,6 +16,7 @@ const _exitColor = Color(0xFFA6A6A6);
 
 const _noteColor = Color(0xFF9A9A9A);
 const _savedColor = Color(0xFF3ADB6D);
+const _pausedColor = Color(0xFFFFB020);
 
 /// what Record shows under its name
 sealed class RecordBadge {
@@ -28,11 +29,13 @@ class BufferBadge extends RecordBadge {
   const BufferBadge(this.length);
 }
 
-/// a clip running: red, "2:14" over "of 5:00"
+/// a clip running: red, "2:14" over "of 5:00", or over an amber "paused" while the camera
+/// area is covered (the clip shows "Recording paused" then)
 class RecordingBadge extends RecordBadge {
   final Duration length;
   final Duration cap;
-  const RecordingBadge(this.length, this.cap);
+  final bool paused;
+  const RecordingBadge(this.length, this.cap, {this.paused = false});
 }
 
 /// a clip just written: "✓ Saved" over "2:14 clip"
@@ -187,10 +190,25 @@ class MenuRail extends StatelessWidget {
             Text('last ${formatRecordingTime(length)}', style: style(_noteColor, 17, FontWeight.bold)),
           ]),
         ],
-      RecordingBadge(:final length, :final cap) => <Widget>[
+      RecordingBadge(:final length, :final cap, :final paused) => <Widget>[
           Text(formatRecordingTime(length), key: const ValueKey('recordTime'), style: style(_recordColor, 21, FontWeight.w800)),
           SizedBox(height: 3 * unit),
-          Text('of ${formatRecordingTime(cap)}', style: style(_noteColor, 15, FontWeight.w600)),
+          if (paused)
+            Row(key: const ValueKey('recordPaused'), mainAxisSize: MainAxisSize.min, children: [
+              // the pause sign, drawn: two bars
+              for (final gap in [3.0, 0.0]) ...[
+                Container(
+                  width: 4 * unit,
+                  height: 13 * unit,
+                  decoration: BoxDecoration(color: _pausedColor, borderRadius: BorderRadius.circular(1 * unit)),
+                ),
+                SizedBox(width: gap * unit),
+              ],
+              SizedBox(width: 5 * unit),
+              Text('paused', style: style(_pausedColor, 15, FontWeight.w700)),
+            ])
+          else
+            Text('of ${formatRecordingTime(cap)}', style: style(_noteColor, 15, FontWeight.w600)),
         ],
       SavedBadge(:final length) => <Widget>[
           Text('✓ Saved', key: const ValueKey('recordSaved'), style: style(_savedColor, 18, FontWeight.w800)),

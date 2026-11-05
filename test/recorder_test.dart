@@ -244,7 +244,9 @@ void main() {
     test('the paused clip says what is covering the camera, or that the app is away', () async {
       final r = make()..setCrop(_crop);
       await r.startBuffer();
+      expect(r.paused, isFalse);
       r.setCoveredBy('Settings');
+      expect(r.paused, isTrue);
       expect(platform.paused, isTrue);
       expect(platform.pauseReason, 'Settings open on the head unit');
       r.setCoveredBy('Navigate');
