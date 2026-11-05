@@ -35,7 +35,8 @@ abstract class RecorderPlatform {
   Future<void> stop();
   Future<void> setBuffer(Duration buffer);
   Future<void> setCrop(Rect crop);
-  Future<void> setPaused(bool paused);
+  /// while paused the clip shows the last camera frame, dimmed, with "Recording paused" and [reason]
+  Future<void> setPaused(bool paused, {String reason = ''});
 
   /// how much the clip includes from before now, or null with no capture running
   Future<Duration?> startClip();
@@ -96,7 +97,7 @@ class MethodChannelRecorder implements RecorderPlatform {
   Future<void> setCrop(Rect crop) => _call('setCrop', _rect(crop));
 
   @override
-  Future<void> setPaused(bool paused) => _call('setPaused', paused);
+  Future<void> setPaused(bool paused, {String reason = ''}) => _call('setPaused', {'paused': paused, 'reason': reason});
 
   @override
   Future<Duration?> startClip() async {

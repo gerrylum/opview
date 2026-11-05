@@ -241,6 +241,22 @@ void main() {
       expect(platform.paused, isTrue);
     });
 
+    test('the paused clip says what is covering the camera, or that the app is away', () async {
+      final r = make()..setCrop(_crop);
+      await r.startBuffer();
+      r.setCoveredBy('Settings');
+      expect(platform.paused, isTrue);
+      expect(platform.pauseReason, 'Settings open on the head unit');
+      r.setCoveredBy('Navigate');
+      expect(platform.pauseReason, 'Navigate open on the head unit');
+      r.setForeground(false);
+      expect(platform.pauseReason, 'OPRivView is in the background');
+      r.setForeground(true);
+      r.setCoveredBy(null);
+      expect(platform.paused, isFalse);
+      expect(platform.pauseReason, '');
+    });
+
     test('changing Keep the last follows into the capture', () async {
       final r = make()..setCrop(_crop);
       await r.startBuffer();

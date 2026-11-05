@@ -39,6 +39,10 @@ class AugmentedRoadView extends StatefulWidget {
   // the Details screen: the comma's figures in cards, the camera in a small window
   final bool details;
 
+  /// the connecting screen's Settings: opens the Settings page (AppShell); without it, Settings
+  /// opens over the whole screen
+  final VoidCallback? onOpenSettings;
+
   const AugmentedRoadView({
     super.key,
     required this.uiState,
@@ -49,6 +53,7 @@ class AugmentedRoadView extends StatefulWidget {
     this.currentHost,
     this.pip = false,
     this.details = false,
+    this.onOpenSettings,
   });
 
   @override
@@ -101,6 +106,7 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
                 clockMode: settings?.clockMode ?? ClockMode.h12,
                 speedLimitDisplay: speedLimitDisplay,
                 hiddenSections: settings?.hiddenSections ?? const <DriveSection>{},
+                mapStyle: settings?.mapStyle ?? MapStyle.dark,
                 frameFor: _fullScreenFrame,
                 videoBuilder: _videoLayer,
               ),
@@ -161,10 +167,12 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
                         ],
                         if (settings != null)
                           TextButton(
-                            onPressed: () => openSettingsMenu(context, settings,
-                                loadManualHost: widget.loadManualHost,
-                                onSetManualHost: widget.onSetManualHost,
-                                currentHost: widget.currentHost),
+                            onPressed: widget.onOpenSettings ??
+                                () => openSettingsMenu(context, settings,
+                                    uiState: widget.uiState,
+                                    loadManualHost: widget.loadManualHost,
+                                    onSetManualHost: widget.onSetManualHost,
+                                    currentHost: widget.currentHost),
                             child: Text(
                               'Settings',
                               style: TextStyle(color: const Color(0x99FFFFFF), fontSize: 20 * scale),
@@ -296,11 +304,12 @@ class DataPausedTag extends StatelessWidget {
   }
 }
 
-/// the settings menu, with the comma's address and a way to change it; from the menu
-/// column and from the connecting screen
+/// Settings over the whole screen, with the comma's address and a way to change it; from the
+/// connecting screen when there is no menu column to open it as a page
 Future<void> openSettingsMenu(
   BuildContext context,
   AppSettings settings, {
+  UIState? uiState,
   Future<String?> Function()? loadManualHost,
   Future<void> Function(String? host)? onSetManualHost,
   String? Function()? currentHost,
@@ -310,6 +319,7 @@ Future<void> openSettingsMenu(
   await showSettingsDialog(
     context,
     settings,
+    uiState: uiState,
     host: currentHost?.call(),
     hostIsManual: manualHost != null,
     onChangeHost: onSetManualHost == null

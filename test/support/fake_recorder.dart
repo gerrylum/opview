@@ -49,9 +49,12 @@ class FakeRecorderPlatform implements RecorderPlatform {
     this.crop = crop;
   }
 
+  String pauseReason = '';
+
   @override
-  Future<void> setPaused(bool paused) async {
+  Future<void> setPaused(bool paused, {String reason = ''}) async {
     this.paused = paused;
+    pauseReason = paused ? reason : '';
   }
 
   @override

@@ -63,6 +63,14 @@ String cameraModeLabel(CameraMode m) => switch (m) { CameraMode.auto => 'Auto', 
 
 const _cameraModeKey = 'camera_mode';
 const _speedLimitKey = 'speed_limit_display';
+const _clockKey = 'clock_mode';
+const _keepScreenOnKey = 'keep_screen_on';
+const _mapStyleKey = 'map_style';
+
+/// Navigate's map: MapTiler's dark or light street map
+enum MapStyle { dark, streets }
+
+String mapStyleLabel(MapStyle s) => switch (s) { MapStyle.dark => 'Dark', MapStyle.streets => 'Streets' };
 const _detailsOpenKey = 'details_open';
 const _recordBufferKey = 'record_buffer_s';
 const _navHomeKey = 'nav_home';
@@ -87,6 +95,11 @@ const minBrightness = 0.05;
 class AppSettings extends ChangeNotifier {
   /// the clock is always shown, in 12 hour time; no longer a setting
   ClockMode clockMode = ClockMode.h12;
+
+  /// keep the head unit's screen on while connected to the comma
+  bool keepScreenOn = true;
+
+  MapStyle mapStyle = MapStyle.dark;
   SpeedLimitDisplay speedLimitDisplay = SpeedLimitDisplay.auto;
   CameraMode cameraMode = CameraMode.auto;
 
@@ -125,6 +138,10 @@ class AppSettings extends ChangeNotifier {
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     speedLimitDisplay = _byName(SpeedLimitDisplay.values, prefs.getString(_speedLimitKey), SpeedLimitDisplay.auto);
+    final clock = _byName(ClockMode.values, prefs.getString(_clockKey), ClockMode.h12);
+    clockMode = clock == ClockMode.h24 ? ClockMode.h24 : ClockMode.h12;  // the settings offer these two
+    keepScreenOn = prefs.getBool(_keepScreenOnKey) ?? true;
+    mapStyle = _byName(MapStyle.values, prefs.getString(_mapStyleKey), MapStyle.dark);
     cameraMode = _byName(CameraMode.values, prefs.getString(_cameraModeKey), CameraMode.auto);
     hiddenSections.clear();
     final savedHidden = prefs.getStringList(_hiddenSectionsKey);
@@ -160,6 +177,30 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_speedLimitKey, value.name);
+  }
+
+  Future<void> setClockMode(ClockMode value) async {
+    if (value == clockMode) return;
+    clockMode = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_clockKey, value.name);
+  }
+
+  Future<void> setKeepScreenOn(bool value) async {
+    if (value == keepScreenOn) return;
+    keepScreenOn = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keepScreenOnKey, value);
+  }
+
+  Future<void> setMapStyle(MapStyle value) async {
+    if (value == mapStyle) return;
+    mapStyle = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_mapStyleKey, value.name);
   }
 
   Future<void> setCameraMode(CameraMode value) async {

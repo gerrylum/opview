@@ -285,7 +285,16 @@ class ConnectionManager {
     if (_uiState.isConnected == connected) return;
     _uiState.isConnected = connected;
     _uiState.notifyNow();
-    wake_lock.setKeepScreenOn(connected);
+    wake_lock.setKeepScreenOn(connected && _keepScreenOn);
+  }
+
+  bool _keepScreenOn = true;
+
+  /// Settings > Display: keep the head unit's screen on while connected
+  set keepScreenOn(bool value) {
+    if (value == _keepScreenOn) return;
+    _keepScreenOn = value;
+    wake_lock.setKeepScreenOn(_uiState.isConnected && value);
   }
 
   /// cancel all timers and subscriptions (but keep _host and _deviceSub)

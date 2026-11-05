@@ -41,7 +41,7 @@ void main() {
       expect(b.cameraMode, CameraMode.road);
     });
 
-    testWidgets('chosen on the Comma tab', (tester) async {
+    testWidgets('chosen on the Comma device page', (tester) async {
       tester.view.physicalSize = const Size(1920, 1080);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -60,10 +60,10 @@ void main() {
       ));
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('settingsTab_comma')));
+      await tester.tap(find.byKey(const ValueKey('settingsCat_comma')));
       await tester.pumpAndSettle();
       expect(find.text('CAMERA'), findsOneWidget);
-      await tester.tap(find.text('Road'));
+      await tester.tap(find.byKey(const ValueKey('choice_camera_Road')));
       await tester.pumpAndSettle();
       expect(settings.cameraMode, CameraMode.road);
       expect(tester.takeException(), isNull);

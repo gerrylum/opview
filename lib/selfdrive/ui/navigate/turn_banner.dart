@@ -91,8 +91,9 @@ class MiniMap extends StatelessWidget {
   final UIState uiState;
   final double unit;
   final bool tiles;
+  final bool light;
 
-  const MiniMap({super.key, required this.uiState, required this.unit, this.tiles = true});
+  const MiniMap({super.key, required this.uiState, required this.unit, this.tiles = true, this.light = false});
 
   @override
   Widget build(BuildContext context) {
@@ -107,7 +108,7 @@ class MiniMap extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       // the map's own sizes are in the 1920x1000 mockup's pixels: about a third of a comma four unit
-      child: NavMap(uiState: uiState, unit: u / 3.3, interactive: false, zoom: navMiniZoom, tiles: tiles && hasMapKey),
+      child: NavMap(uiState: uiState, unit: u / 3.3, interactive: false, zoom: navMiniZoom, tiles: tiles && hasMapKey, light: light),
     );
   }
 }

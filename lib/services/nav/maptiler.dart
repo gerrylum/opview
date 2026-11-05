@@ -18,6 +18,9 @@ const mapTilerHeaders = {'User-Agent': mapTilerUserAgent};
 /// the dark street map, 256 px raster tiles (one API request each)
 const mapTileUrl = 'https://api.maptiler.com/maps/streets-v2-dark/256/{z}/{x}/{y}.png?key=$mapTilerKey';
 
+/// the light street map, the same way
+const mapTileUrlLight = 'https://api.maptiler.com/maps/streets-v2/256/{z}/{x}/{y}.png?key=$mapTilerKey';
+
 /// shown on the map, as MapTiler's and OpenStreetMap's terms ask
 const mapAttribution = '© MapTiler © OpenStreetMap contributors';
 

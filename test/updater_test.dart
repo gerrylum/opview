@@ -137,16 +137,22 @@ void main() {
     }
 
     Future<void> updatesTab(WidgetTester tester) async {
-      await tester.tap(find.byKey(const ValueKey('settingsTab_updates')));
+      await tester.tap(find.byKey(const ValueKey('settingsCat_about')));
       await tester.pumpAndSettle();
     }
 
-    testWidgets('brightness on the Display tab, updates on their own tab', (tester) async {
+    Future<void> displayPage(WidgetTester tester) async {
+      await tester.tap(find.byKey(const ValueKey('settingsCat_display')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('brightness on the Display page, updates under Updates & about', (tester) async {
       await open(tester, _updater('0.1.1-mici.4', () => http.Response('{}', 200)));
+      await displayPage(tester);
       expect(find.text('BRIGHTNESS'), findsOneWidget);
-      expect(find.text('OPRIVVIEW UPDATES'), findsNothing);
+      expect(find.text('UPDATE'), findsNothing);
       await updatesTab(tester);
-      expect(find.text('OPRIVVIEW UPDATES'), findsOneWidget);
+      expect(find.text('UPDATE'), findsOneWidget);
       expect(find.text('BRIGHTNESS'), findsNothing);
       expect(find.byKey(const ValueKey('updateCheck')), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -157,13 +163,16 @@ void main() {
       await updatesTab(tester);
       await tester.tap(find.byKey(const ValueKey('updateCheck')));
       await tester.pumpAndSettle();
-      expect(find.text('Update available'), findsOneWidget);
+      expect(find.text('0.1.1-mici.5 available'), findsOneWidget);
       expect(find.byKey(const ValueKey('updateInstall')), findsOneWidget);
       expect(find.text('• Swipe sideways to change the layout'), findsOneWidget);
+      // and a dot on the category, to find it from the other pages
+      expect(find.byKey(const ValueKey('settingsUpdateDot')), findsOneWidget);
     });
 
     testWidgets('brightness: Auto by default, the slider sets it, Auto hands it back', (tester) async {
       final settings = await open(tester, _updater('0.1.1-mici.4', () => http.Response('{}', 200)));
+      await displayPage(tester);
       expect(settings.brightness, isNull);
       await tester.tap(find.byKey(const ValueKey('brightnessSlider')));  // the middle of the track
       await tester.pumpAndSettle();

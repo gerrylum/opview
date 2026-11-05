@@ -12,12 +12,14 @@ import 'package:opview/selfdrive/ui/gallery/clip_playback.dart';
 import 'package:opview/selfdrive/ui/gallery/gallery_view.dart';
 import 'package:opview/selfdrive/ui/navigate/navigate_view.dart';
 import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
+import 'package:opview/selfdrive/ui/settings/settings_page.dart';
 import 'package:opview/selfdrive/ui/shell/menu_rail.dart';
 import 'package:opview/selfdrive/ui/shell/status_bar.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
 import 'package:opview/services/nav/maptiler.dart';
 import 'package:opview/services/recorder/recorder.dart';
+import 'package:opview/services/updater.dart';
 
 const shellRefWidth = 1920.0;
 const shellRefHeight = 1000.0;
@@ -52,6 +54,12 @@ class AppShell extends StatefulWidget {
   /// leaves the app; replaceable in tests
   final VoidCallback? onExit;
 
+  /// Settings' Reconnect (ConnectionManager.reconnect)
+  final VoidCallback? onReconnect;
+
+  /// Settings' updates; the app's own unless replaced (tests)
+  final Updater? updater;
+
   const AppShell({
     super.key,
     required this.uiState,
@@ -66,6 +74,8 @@ class AppShell extends StatefulWidget {
     this.placeSearch,
     this.mapTiles = true,
     this.onExit,
+    this.onReconnect,
+    this.updater,
   });
 
   @override
@@ -81,9 +91,19 @@ RecordBadge? recordBadge(Recorder? r) {
   return null;
 }
 
+/// what is open over the camera area, if anything
+enum ShellPage { gallery, navigate, settings }
+
+/// how the paused clip names [page] (ScreenCapture's "Recording paused" card)
+String shellPageLabel(ShellPage page) => switch (page) {
+      ShellPage.gallery => 'Gallery',
+      ShellPage.navigate => 'Navigate',
+      ShellPage.settings => 'Settings',
+    };
+
 class _AppShellState extends State<AppShell> {
-  bool _galleryOpen = false;
-  bool _navigateOpen = false;
+  ShellPage? _page;
+  bool _hostIsManual = false;
   bool _wasConnected = false;
   bool _explaining = false;
 
@@ -149,8 +169,7 @@ class _AppShellState extends State<AppShell> {
       _note('Recording is not available');
       return;
     }
-    if (_galleryOpen) _setGallery(false);
-    if (_navigateOpen) _setNavigate(false);
+    _show(null);  // Record shows the camera, which is what it records
     if (!r.recording && !await _explained()) return;
     await r.toggle();
     final error = r.lastError;
@@ -160,20 +179,30 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  void _setGallery(bool open) {
-    setState(() {
-      _galleryOpen = open;
-      if (open) _navigateOpen = false;
-    });
-    recorder?.setCameraHidden(_galleryOpen || _navigateOpen);
+  /// opens [page] over the camera area (one at a time), or closes it with null; a clip being
+  /// recorded meanwhile shows the last camera frame with "Recording paused"
+  void _show(ShellPage? page) {
+    if (page == _page) return;
+    setState(() => _page = page);
+    recorder?.setCoveredBy(page == null ? null : shellPageLabel(page));
   }
 
-  void _setNavigate(bool open) {
-    setState(() {
-      _navigateOpen = open;
-      if (open) _galleryOpen = false;
-    });
-    recorder?.setCameraHidden(_galleryOpen || _navigateOpen);
+  void _toggle(ShellPage page) => _show(_page == page ? null : page);
+
+  Future<void> _openSettings() async {
+    // whether the comma's address was typed in, for the Comma device page
+    final manual = await widget.loadManualHost?.call();
+    if (!mounted) return;
+    _hostIsManual = manual != null;
+    _show(ShellPage.settings);
+  }
+
+  Future<void> _changeHost() async {
+    final set = widget.onSetManualHost;
+    if (set == null) return;
+    await askForDeviceIp(context, loadManualHost: widget.loadManualHost, onSetManualHost: set);
+    final manual = await widget.loadManualHost?.call();
+    if (mounted) setState(() => _hostIsManual = manual != null);
   }
 
   void _note(String text) {
@@ -202,9 +231,12 @@ class _AppShellState extends State<AppShell> {
           final crop = Rect.fromLTWH(railW * dpr, 0, (constraints.maxWidth - railW) * dpr, constraints.maxHeight * dpr);
           WidgetsBinding.instance.addPostFrameCallback((_) => r.setCrop(crop));
         }
-        final active = _navigateOpen
-            ? MenuItem.navigate
-            : (_galleryOpen ? MenuItem.gallery : (settings.detailsOpen ? MenuItem.details : null));
+        final active = switch (_page) {
+          ShellPage.navigate => MenuItem.navigate,
+          ShellPage.gallery => MenuItem.gallery,
+          ShellPage.settings => MenuItem.settings,
+          null => settings.detailsOpen ? MenuItem.details : null,
+        };
         return MediaQuery(
           data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
           child: Row(
@@ -221,9 +253,9 @@ class _AppShellState extends State<AppShell> {
                   children: [
                     Expanded(
                       child: Stack(fit: StackFit.expand, children: [
-                        // kept while the Gallery or Navigate is open, so the video does not restart
+                        // kept while a page is open, so the video does not restart
                         Offstage(
-                          offstage: _galleryOpen || _navigateOpen,
+                          offstage: _page != null,
                           child: AugmentedRoadView(
                             uiState: uiState,
                             videoRenderer: widget.videoRenderer,
@@ -232,18 +264,33 @@ class _AppShellState extends State<AppShell> {
                             currentHost: widget.currentHost,
                             settings: settings,
                             details: settings.detailsOpen,
+                            onOpenSettings: _openSettings,
                           ),
                         ),
-                        if (_galleryOpen && r != null) GalleryView(recorder: r, unit: unit, playback: widget.playback),
-                        if (_navigateOpen && widget.sendNavDestination != null)
+                        if (_page == ShellPage.gallery && r != null) GalleryView(recorder: r, unit: unit, playback: widget.playback),
+                        if (_page == ShellPage.navigate && widget.sendNavDestination != null)
                           NavigateView(
                             uiState: uiState,
                             settings: settings,
                             unit: unit,
                             send: widget.sendNavDestination!,
-                            onClose: () => _setNavigate(false),
+                            onClose: () => _show(null),
                             search: widget.placeSearch,
                             tiles: widget.mapTiles && hasMapKey,
+                          ),
+                        if (_page == ShellPage.settings)
+                          SettingsPage(
+                            settings: settings,
+                            uiState: uiState,
+                            unit: unit,
+                            updater: widget.updater ?? appUpdater,
+                            recorder: r,
+                            host: widget.currentHost?.call(),
+                            hostIsManual: _hostIsManual,
+                            onChangeHost: widget.onSetManualHost == null ? null : _changeHost,
+                            onReconnect: widget.onReconnect,
+                            build: opviewBuild,
+                            onDone: () => _show(null),
                           ),
                       ]),
                     ),
@@ -262,15 +309,17 @@ class _AppShellState extends State<AppShell> {
   void _onMenu(BuildContext context, MenuItem item) {
     switch (item) {
       case MenuItem.settings:
-        openSettingsMenu(context, settings,
-            loadManualHost: widget.loadManualHost, onSetManualHost: widget.onSetManualHost, currentHost: widget.currentHost);
+        if (_page == ShellPage.settings) {
+          _show(null);
+        } else {
+          _openSettings();
+        }
       case MenuItem.exit:
         _confirmExit(context);
       case MenuItem.details:
         // a toggle: tap again to go back to the driving view
-        if (_galleryOpen || _navigateOpen) {
-          _setGallery(false);
-          _setNavigate(false);
+        if (_page != null) {
+          _show(null);
           settings.setDetailsOpen(true);
         } else {
           settings.setDetailsOpen(!settings.detailsOpen);
@@ -281,13 +330,13 @@ class _AppShellState extends State<AppShell> {
         if (widget.sendNavDestination == null) {
           _note('Navigate is not available');
         } else {
-          _setNavigate(!_navigateOpen);
+          _toggle(ShellPage.navigate);
         }
       case MenuItem.gallery:
         if (recorder == null) {
           _note('Gallery is not available');
         } else {
-          _setGallery(!_galleryOpen);
+          _toggle(ShellPage.gallery);
         }
     }
   }

@@ -235,7 +235,9 @@ class MainActivity: FlutterActivity() {
                     result.success(null)
                 }
                 "setPaused" -> {
-                    CaptureHub.capture?.paused = call.arguments as? Boolean ?: false
+                    // {paused, reason}, or a bare Boolean from an older Dart side
+                    val paused = (args["paused"] as? Boolean) ?: (call.arguments as? Boolean) ?: false
+                    CaptureHub.capture?.setPaused(paused, args["reason"] as? String ?: "")
                     result.success(null)
                 }
                 // returns how much of the clip is from before the tap (ms), or null without a capture

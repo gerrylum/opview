@@ -30,7 +30,10 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
   // picture-in-picture is offered on Home only while there is something to show
   bool? _pipOffered;
 
-  void _applyCameraMode() => _connectionManager.cameraMode = _settings.cameraMode;
+  void _applyCameraMode() {
+    _connectionManager.cameraMode = _settings.cameraMode;
+    _connectionManager.keepScreenOn = _settings.keepScreenOn;
+  }
 
   void _updatePipOffer() {
     final want = _uiState.isConnected;
@@ -121,6 +124,7 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
                 currentHost: () => _connectionManager.host,
                 recorder: _recorder,
                 sendNavDestination: _connectionManager.sendNavDestination,
+                onReconnect: _connectionManager.reconnect,
               ),
       ),
     );

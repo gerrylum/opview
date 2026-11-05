@@ -36,6 +36,9 @@ class NavMap extends StatefulWidget {
 
   final double zoom;
 
+  /// MapTiler's light street map instead of the dark one (Settings > Navigation)
+  final bool light;
+
   /// draw the MapTiler tiles (off in tests, and without a key)
   final bool tiles;
 
@@ -47,6 +50,7 @@ class NavMap extends StatefulWidget {
     this.destination,
     this.overview = false,
     this.zoom = navFollowZoom,
+    this.light = false,
     this.tiles = hasMapKey,
   });
 
@@ -186,7 +190,7 @@ class NavMapState extends State<NavMap> {
           children: [
             if (widget.tiles)
               TileLayer(
-                urlTemplate: mapTileUrl,
+                urlTemplate: widget.light ? mapTileUrlLight : mapTileUrl,
                 userAgentPackageName: 'OPRivView',
                 tileProvider: _tileProvider,
                 maxZoom: 19,

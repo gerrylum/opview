@@ -71,8 +71,22 @@ class ScreenCapture(
     private var drainThread: Thread? = null
     @Volatile private var running = false
 
-    // frames are dropped (nothing new encoded) while the camera view is not on screen
-    @Volatile var paused = false
+    // while the camera view is covered (Settings, Gallery, Navigate, the background) the clip shows
+    // the last camera frame, dimmed, with "Recording paused" (Gerry 2026-11-05, mockup P1)
+    @Volatile private var paused = false
+    private var pausedReason = ""
+
+    // recent camera frames kept as textures, so the paused card shows one from before the cover
+    // appeared (the pause call arrives a frame or two after it)
+    private val snaps = IntArray(2)
+    private val snapFbos = IntArray(2)
+    private val snapAtNs = LongArray(2)
+    private var nextSnap = 0
+    private var pausedSnap = -1
+    private var cardTex = 0
+    private var cardW = 0
+    private var cardH = 0
+    private var program2d = 0
 
     private var encoder: MediaCodec? = null
     private var display: VirtualDisplay? = null
@@ -94,8 +108,9 @@ class ScreenCapture(
             if (!running) return
             try {
                 val now = System.nanoTime()
-                if (haveFrame && !paused && now - lastDrawWallNs >= KEEP_ALIVE_MS * 1_000_000) {
-                    present(lastPtsNs + (now - lastDrawWallNs))
+                if (haveFrame && now - lastDrawWallNs >= KEEP_ALIVE_MS * 1_000_000) {
+                    val pts = lastPtsNs + (now - lastDrawWallNs)
+                    if (paused) presentPaused(pts) else present(pts)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "keep alive", e)
@@ -160,6 +175,23 @@ class ScreenCapture(
         gl.post { crop = clampCrop(rect) }
     }
 
+    /** cover the clip with the paused card, saying [reason] ("Gallery open on the head unit"), or lift it */
+    fun setPaused(value: Boolean, reason: String) {
+        gl.post {
+            try {
+                if (value && (!paused || reason != pausedReason)) {
+                    if (!paused) pausedSnap = olderSnap()
+                    pausedReason = reason
+                    makeCard(reason)
+                }
+                paused = value
+            } catch (e: Exception) {
+                Log.w(TAG, "pause", e)
+                paused = value
+            }
+        }
+    }
+
     /** start a clip with what is buffered; returns how much from before now it includes (ms) */
     fun startClip(): Long = segments.startClip(bufferMs * 1000) / 1000
 
@@ -208,6 +240,7 @@ class ScreenCapture(
             e.makeCurrent()
             program = buildProgram()
             texId = createOesTexture()
+            setUpSnapshots()
             val st = SurfaceTexture(texId)
             st.setDefaultBufferSize(displayW, displayH)
             st.setOnFrameAvailableListener({ onFrame() }, gl)
@@ -246,6 +279,7 @@ class ScreenCapture(
             st.getTransformMatrix(texMatrix)
             haveFrame = true
             present(st.timestamp)
+            snapshot()
         } catch (ex: Exception) {
             Log.w(TAG, "frame", ex)
         }
@@ -261,6 +295,134 @@ class ScreenCapture(
         e.swapBuffers()
         lastPtsNs = pts
         lastDrawWallNs = System.nanoTime()
+    }
+
+    // -- the paused card --
+
+    /** every 200 ms, copy the camera frame into the older of the two snapshot textures */
+    private fun snapshot() {
+        val now = System.nanoTime()
+        val newest = snapAtNs[(nextSnap + 1) % 2]
+        if (snaps[0] == 0 || now - newest < 200_000_000L) return
+        val i = nextSnap
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, snapFbos[i])
+        GLES20.glViewport(0, 0, outW, outH)
+        draw()
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        snapAtNs[i] = now
+        nextSnap = (i + 1) % 2
+    }
+
+    /** the snapshot from before the cover appeared: the older one, if it has a frame */
+    private fun olderSnap(): Int {
+        if (snaps[0] == 0) return -1
+        val older = if (snapAtNs[0] <= snapAtNs[1]) 0 else 1
+        return when {
+            snapAtNs[older] > 0 -> older
+            snapAtNs[1 - older] > 0 -> 1 - older
+            else -> -1
+        }
+    }
+
+    private fun setUpSnapshots() {
+        GLES20.glGenTextures(2, snaps, 0)
+        GLES20.glGenFramebuffers(2, snapFbos, 0)
+        for (i in 0..1) {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, snaps[i])
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, outW, outH, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+            texParams2d()
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, snapFbos[i])
+            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, snaps[i], 0)
+        }
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        program2d = buildProgram(VERTEX_2D, FRAGMENT_2D)
+    }
+
+    private fun texParams2d() {
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+    }
+
+    /** the card: a pause sign, "Recording paused", and the reason with the time, as a texture */
+    private fun makeCard(reason: String) {
+        val w = (outW * 0.5f).toInt().coerceAtLeast(200)
+        val h = (w * 0.24f).toInt()
+        val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        paint.color = android.graphics.Color.argb(217, 20, 20, 20)
+        c.drawRoundRect(android.graphics.RectF(0f, 0f, w.toFloat(), h.toFloat()), h * 0.18f, h * 0.18f, paint)
+        // the pause sign
+        paint.color = android.graphics.Color.WHITE
+        val bar = h * 0.09f
+        val top = h * 0.3f
+        val left = h * 0.32f
+        c.drawRoundRect(android.graphics.RectF(left, top, left + bar, h - top), bar / 4, bar / 4, paint)
+        c.drawRoundRect(android.graphics.RectF(left + bar * 2.2f, top, left + bar * 3.2f, h - top), bar / 4, bar / 4, paint)
+        val textX = left + bar * 3.2f + h * 0.22f
+        paint.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+        paint.textSize = h * 0.3f
+        c.drawText("Recording paused", textX, h * 0.5f, paint)
+        paint.typeface = android.graphics.Typeface.DEFAULT
+        paint.color = android.graphics.Color.rgb(191, 191, 191)
+        paint.textSize = h * 0.16f
+        val time = java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date())
+        val sub = if (reason.isEmpty()) time else "$reason · $time"
+        c.drawText(sub, textX, h * 0.78f, paint)
+        if (cardTex == 0) {
+            val ids = IntArray(1)
+            GLES20.glGenTextures(1, ids, 0)
+            cardTex = ids[0]
+        }
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, cardTex)
+        texParams2d()
+        android.opengl.GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bmp, 0)
+        bmp.recycle()
+        cardW = w
+        cardH = h
+    }
+
+    /** the paused frame: the snapshot dimmed (or black), with the card in the middle */
+    private fun presentPaused(ptsNs: Long) {
+        val e = egl ?: return
+        val pts = maxOf(ptsNs, lastPtsNs + 1_000_000)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        GLES20.glViewport(0, 0, outW, outH)
+        GLES20.glClearColor(0f, 0f, 0f, 1f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        val snap = pausedSnap
+        if (snap >= 0) draw2d(snaps[snap], QUAD, TEX_UP, dim = 0.35f)
+        if (cardTex != 0) {
+            // centred, in clip coordinates (-1..1)
+            val hw = cardW.toFloat() / outW
+            val hh = cardH.toFloat() / outH
+            val quad = floatArrayOf(-hw, -hh, hw, -hh, -hw, hh, hw, hh)
+            GLES20.glEnable(GLES20.GL_BLEND)
+            GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)  // the bitmap's alpha is premultiplied
+            draw2d(cardTex, floats(quad), TEX_BITMAP, dim = 1f)
+            GLES20.glDisable(GLES20.GL_BLEND)
+        }
+        e.setPresentationTime(pts)
+        e.swapBuffers()
+        lastPtsNs = pts
+        lastDrawWallNs = System.nanoTime()
+    }
+
+    private fun draw2d(tex: Int, quad: FloatBuffer, texCoords: FloatBuffer, dim: Float) {
+        GLES20.glUseProgram(program2d)
+        val aPos = GLES20.glGetAttribLocation(program2d, "aPos")
+        val aTex = GLES20.glGetAttribLocation(program2d, "aTex")
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(program2d, "uDim"), dim)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex)
+        GLES20.glUniform1i(GLES20.glGetUniformLocation(program2d, "sTex"), 0)
+        GLES20.glEnableVertexAttribArray(aPos)
+        GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, quad)
+        GLES20.glEnableVertexAttribArray(aTex)
+        GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 0, texCoords)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
     }
 
     private fun draw() {
@@ -331,7 +493,7 @@ class ScreenCapture(
 
     // -- GL helpers --
 
-    private fun buildProgram(): Int {
+    private fun buildProgram(vertex: String = VERTEX, fragment: String = FRAGMENT): Int {
         fun shader(type: Int, src: String): Int {
             val s = GLES20.glCreateShader(type)
             GLES20.glShaderSource(s, src)
@@ -339,8 +501,8 @@ class ScreenCapture(
             return s
         }
         val p = GLES20.glCreateProgram()
-        GLES20.glAttachShader(p, shader(GLES20.GL_VERTEX_SHADER, VERTEX))
-        GLES20.glAttachShader(p, shader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT))
+        GLES20.glAttachShader(p, shader(GLES20.GL_VERTEX_SHADER, vertex))
+        GLES20.glAttachShader(p, shader(GLES20.GL_FRAGMENT_SHADER, fragment))
         GLES20.glLinkProgram(p)
         return p
     }
@@ -376,7 +538,32 @@ class ScreenCapture(
                 gl_FragColor = texture2D(sTex, vTex);
             }
         """
+        private const val VERTEX_2D = """
+            attribute vec4 aPos;
+            attribute vec2 aTex;
+            varying vec2 vTex;
+            void main() {
+                gl_Position = aPos;
+                vTex = aTex;
+            }
+        """
+        private const val FRAGMENT_2D = """
+            precision mediump float;
+            varying vec2 vTex;
+            uniform sampler2D sTex;
+            uniform float uDim;
+            void main() {
+                vec4 c = texture2D(sTex, vTex);
+                gl_FragColor = vec4(c.rgb * uDim, c.a);
+            }
+        """
         private val QUAD = floats(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
+
+        // a snapshot rendered into a texture is the right way up in GL's coordinates
+        private val TEX_UP = floats(floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f))
+
+        // a bitmap's first row is the texture's t = 0: flip it so its top is up
+        private val TEX_BITMAP = floats(floatArrayOf(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f))
 
         private fun floats(a: FloatArray): FloatBuffer =
             ByteBuffer.allocateDirect(a.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {

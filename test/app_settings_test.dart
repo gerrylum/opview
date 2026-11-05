@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
 import 'package:opview/selfdrive/ui/settings/settings_dialog.dart';
+import 'package:opview/selfdrive/ui/settings/settings_page.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
+import 'package:opview/services/nav/places.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Widget _clock(ClockMode mode, DateTime time, {bool system24 = false}) {
@@ -162,7 +164,8 @@ void main() {
       ]);
     });
 
-    Future<void> open(WidgetTester tester, {String? host, bool manual = false, VoidCallback? onChange, bool commaTab = true}) async {
+    Future<AppSettings> open(WidgetTester tester,
+        {String? host, bool manual = false, VoidCallback? onChange, SettingsCategory? page = SettingsCategory.comma, UIState? uiState}) async {
       tester.view.physicalSize = const Size(1920, 1080);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -174,7 +177,7 @@ void main() {
           child: Builder(
             builder: (context) => TextButton(
               onPressed: () => showSettingsDialog(context, settings,
-                  host: host, hostIsManual: manual, onChangeHost: onChange, build: 'abc1234'),
+                  uiState: uiState, host: host, hostIsManual: manual, onChangeHost: onChange, build: 'abc1234'),
               child: const Text('open'),
             ),
           ),
@@ -182,27 +185,30 @@ void main() {
       ));
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
-      // the comma's address is on the Comma tab
-      if (commaTab) {
-        await tester.tap(find.byKey(const ValueKey('settingsTab_comma')));
+      if (page != null) {
+        await tester.tap(find.byKey(ValueKey('settingsCat_${page.name}')));
         await tester.pumpAndSettle();
       }
+      return settings;
     }
 
-    testWidgets('opens on the Display tab, with a switch for every section', (tester) async {
-      await open(tester, commaTab: false);
-      expect(find.text('SHOW ON SCREEN'), findsOneWidget);
-      for (final s in DriveSection.values) {
-        expect(find.text(driveSectionLabel(s)), findsOneWidget);
+    testWidgets('opens on Driving view: the picture and a switch for every part', (tester) async {
+      await open(tester, page: null);
+      for (final c in SettingsCategory.values) {
+        expect(find.byKey(ValueKey('settingsCat_${c.name}')), findsOneWidget);
       }
-      expect(find.text('SPEED LIMIT'), findsOneWidget);
-      expect(find.text('BRIGHTNESS'), findsOneWidget);
-      expect(find.text('COMMA DEVICE'), findsNothing);
+      expect(find.byKey(const ValueKey('drivingViewPicture')), findsOneWidget);
+      for (final s in DriveSection.values) {
+        expect(find.byKey(ValueKey('section_${s.name}')), findsOneWidget);
+      }
+      expect(find.byKey(const ValueKey('section_speedLimit')), findsOneWidget);
+      expect(find.text('SPEED LIMIT SIGN'), findsOneWidget);
+      expect(find.text('BRIGHTNESS'), findsNothing);
       expect(tester.takeException(), isNull);
     });
 
     testWidgets('a section switch hides it and is remembered', (tester) async {
-      await open(tester, commaTab: false);
+      await open(tester, page: null);
       await tester.ensureVisible(find.byKey(const ValueKey('section_torque')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('section_torque')));
@@ -213,45 +219,103 @@ void main() {
       expect(again.shows(DriveSection.speed), isTrue);
     });
 
+    testWidgets('tapping a part of the picture does the same as its switch', (tester) async {
+      final settings = await open(tester, page: null);
+      await tester.tap(find.byKey(const ValueKey('preview_driver')));
+      await tester.pumpAndSettle();
+      expect(settings.shows(DriveSection.driver), isFalse);
+      expect(find.text('\u2715 Driver'), findsOneWidget);
+      // the speed limit sign is the speed limit choice: off, and back to Auto
+      await tester.tap(find.byKey(const ValueKey('preview_speedLimit')));
+      await tester.pumpAndSettle();
+      expect(settings.speedLimitDisplay, SpeedLimitDisplay.off);
+      await tester.tap(find.byKey(const ValueKey('section_speedLimit')));
+      await tester.pumpAndSettle();
+      expect(settings.speedLimitDisplay, SpeedLimitDisplay.auto);
+    });
+
+    testWidgets('Display: the clock and keeping the screen on', (tester) async {
+      final settings = await open(tester, page: SettingsCategory.display);
+      await tester.tap(find.byKey(const ValueKey('choice_clock_24 h')));
+      await tester.pumpAndSettle();
+      expect(settings.clockMode, ClockMode.h24);
+      expect(settings.keepScreenOn, isTrue);
+      await tester.tap(find.byKey(const ValueKey('keepScreenOn')));
+      await tester.pumpAndSettle();
+      final again = AppSettings();
+      await again.load();
+      expect(again.clockMode, ClockMode.h24);
+      expect(again.keepScreenOn, isFalse);
+    });
+
+    testWidgets('Navigation: map style, and Home cleared', (tester) async {
+      final settings = await open(tester, page: null);
+      await settings.setNavHome(const Place(name: 'Home', address: '1 Main St', lat: 49.2, lon: -123.1));
+      await tester.tap(find.byKey(const ValueKey('settingsCat_navigation')));
+      await tester.pumpAndSettle();
+      expect(find.text('1 Main St'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('clearHome')));
+      await tester.pumpAndSettle();
+      expect(settings.navHome, isNull);
+      await tester.ensureVisible(find.byKey(const ValueKey('choice_mapStyle_Streets')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('choice_mapStyle_Streets')));
+      await tester.pumpAndSettle();
+      expect(settings.mapStyle, MapStyle.streets);
+    });
+
     testWidgets('shows the comma address, how it was found, and the build', (tester) async {
       await open(tester, host: '192.168.1.50');
       expect(find.text('192.168.1.50'), findsOneWidget);
       expect(find.text('found automatically'), findsOneWidget);
       expect(find.text('OPRivView \u00B7 abc1234'), findsOneWidget);
-      expect(find.text('Change'), findsNothing);  // no way to change it was given
+      expect(find.byKey(const ValueKey('changeHost')), findsNothing);  // no way to change it was given
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('says when the address was typed in, and when there is none yet', (tester) async {
+    testWidgets('the comma\'s own settings, read from it', (tester) async {
+      final state = UIState()
+        ..laneGuardSeen = true
+        ..laneGuardEnabled = true
+        ..navigationEnabled = false;
+      await open(tester, host: '192.168.1.50', uiState: state);
+      expect(find.text('Lane guard'), findsOneWidget);
+      expect(find.text('on'), findsOneWidget);
+      expect(find.text('off'), findsOneWidget);
+    });
+
+    testWidgets('says when the address was typed in, and when there is none yet; Done closes', (tester) async {
       await open(tester, host: '10.0.0.5', manual: true);
       expect(find.text('entered by hand'), findsOneWidget);
-      await tester.tap(find.byIcon(Icons.close));
+      await tester.tap(find.byKey(const ValueKey('settingsDone')));
       await tester.pumpAndSettle();
-      expect(find.text('Settings'), findsNothing);
+      expect(find.byKey(const ValueKey('settingsPage')), findsNothing);
 
       await open(tester);
       expect(find.text('Not found yet'), findsOneWidget);
       expect(find.text('searching the network'), findsOneWidget);
     });
 
-    testWidgets('Change closes the menu and asks for the address', (tester) async {
+    testWidgets('Change closes Settings and asks for the address', (tester) async {
       var asked = 0;
       await open(tester, host: '192.168.1.50', onChange: () => asked++);
-      // the menu scrolls once it is taller than the screen
-      await tester.ensureVisible(find.text('Change'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Change'));
+      await tester.tap(find.byKey(const ValueKey('changeHost')));
       await tester.pumpAndSettle();
       expect(asked, 1);
-      expect(find.text('Settings'), findsNothing);
+      expect(find.byKey(const ValueKey('settingsPage')), findsNothing);
     });
 
-    testWidgets('fits a screen as short as the comma four shape', (tester) async {
-      await open(tester, host: '192.168.1.50', onChange: () {});
-      tester.view.physicalSize = const Size(1072, 480);
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-    });
+    for (final c in SettingsCategory.values) {
+      testWidgets('${settingsCategoryLabel(c)} fits a screen as short as the comma four shape', (tester) async {
+        await open(tester, host: '192.168.1.50', onChange: () {}, page: c);
+        tester.view.physicalSize = const Size(1072, 480);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        tester.view.physicalSize = const Size(1280, 720);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      });
+    }
   });
 
   group('ClockRenderer', () {

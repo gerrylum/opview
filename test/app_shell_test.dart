@@ -118,12 +118,30 @@ void main() {
       expect(tester.getRect(find.byType(AugmentedRoadView)).bottom, 1000);
     });
 
-    testWidgets('Settings in the menu opens the settings', (tester) async {
+    testWidgets('Settings in the menu opens Settings in the camera area; Done goes back', (tester) async {
       _screen(tester, 1920, 1000);
       await tester.pumpWidget(_shell(_withDevice(), AppSettings()));
       await tester.tap(find.byKey(const ValueKey('menu_settings')));
       await tester.pumpAndSettle();
-      expect(find.text('SHOW ON SCREEN'), findsOneWidget);
+      expect(find.byKey(const ValueKey('settingsPage')), findsOneWidget);
+      expect(tester.widget<MenuRail>(find.byType(MenuRail)).active, MenuItem.settings);
+      // beside the menu, above the status bar
+      final page = tester.getRect(find.byKey(const ValueKey('settingsPage')));
+      expect(page.left, tester.getRect(find.byType(MenuRail)).right);
+      expect(page.bottom, tester.getRect(find.byKey(const ValueKey('statusBar'))).top);
+      await tester.tap(find.byKey(const ValueKey('settingsDone')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('settingsPage')), findsNothing);
+      expect(tester.widget<MenuRail>(find.byType(MenuRail)).active, isNull);
+    });
+
+    testWidgets('Settings on the connecting screen opens the same page', (tester) async {
+      _screen(tester, 1920, 1000);
+      await tester.pumpWidget(_shell(UIState(), AppSettings()));
+      await tester.tap(find.descendant(of: find.byType(AugmentedRoadView), matching: find.text('Settings')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('settingsPage')), findsOneWidget);
+      expect(tester.widget<MenuRail>(find.byType(MenuRail)).active, MenuItem.settings);
     });
 
     testWidgets('a section switched off in the settings disappears from the screen', (tester) async {
@@ -137,10 +155,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('section_steering')));
       await tester.pumpAndSettle();
-      // the list grew: scroll back up to the close button
-      await tester.ensureVisible(find.byIcon(Icons.close));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.close));
+      await tester.tap(find.byKey(const ValueKey('settingsDone')));
       await tester.pumpAndSettle();
       expect(settings.shows(DriveSection.steering), isFalse);
       expect(find.byType(EnhancedSteeringPills), findsNothing);
@@ -214,6 +229,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('galleryView')), findsOneWidget);
         expect(platform.paused, isTrue);
+        expect(platform.pauseReason, 'Gallery open on the head unit');
         expect(find.byKey(const ValueKey('statusBar')), findsOneWidget);
         await tester.tap(find.byKey(const ValueKey('menu_gallery')));
         await tester.pumpAndSettle();
@@ -247,6 +263,7 @@ void main() {
         expect(find.byKey(const ValueKey('navigateView')), findsOneWidget);
         expect(tester.widget<MenuRail>(find.byType(MenuRail)).active, MenuItem.navigate);
         expect(platform.paused, isTrue);
+        expect(platform.pauseReason, 'Navigate open on the head unit');
         // the Gallery replaces it
         await tester.tap(find.byKey(const ValueKey('menu_gallery')));
         await tester.pump();
@@ -256,6 +273,29 @@ void main() {
         await tester.pump();
         expect(platform.paused, isFalse);
         expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+        recorder.dispose();
+      });
+
+      testWidgets('Settings pauses the recording too, and says so in the clip; Record goes back to the camera', (tester) async {
+        _screen(tester, 1920, 1000);
+        final settings = AppSettings()..recordExplained = true;
+        final st = _withDevice()..isConnected = true;
+        final platform = FakeRecorderPlatform(dir: null);
+        final recorder = Recorder(platform: platform, settings: settings, uiState: st);
+        await tester.pumpWidget(_shell(st, settings, recorder: recorder));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('menu_settings')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('settingsPage')), findsOneWidget);
+        expect(platform.paused, isTrue);
+        expect(platform.pauseReason, 'Settings open on the head unit');
+        await tester.tap(find.byKey(const ValueKey('menu_record')));
+        await tester.pump();
+        await tester.pump();
+        expect(find.byKey(const ValueKey('settingsPage')), findsNothing);
+        expect(platform.paused, isFalse);
+        expect(recorder.recording, isTrue);
         await tester.pumpWidget(const SizedBox());
         recorder.dispose();
       });

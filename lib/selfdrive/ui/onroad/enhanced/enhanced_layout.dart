@@ -137,6 +137,9 @@ class EnhancedLayout extends StatelessWidget {
   /// sections turned off in Settings > Display
   final Set<DriveSection> hiddenSections;
 
+  /// the mini map's style while navigating
+  final MapStyle mapStyle;
+
   /// where the camera image goes and the matching overlay transform, for the whole
   /// screen; the same framing as the Classic layout
   final FrameTransform Function(double w, double h) frameFor;
@@ -148,6 +151,7 @@ class EnhancedLayout extends StatelessWidget {
     required this.clockMode,
     this.speedLimitDisplay = SpeedLimitDisplay.auto,
     this.hiddenSections = const {},
+    this.mapStyle = MapStyle.dark,
     required this.frameFor,
     required this.videoBuilder,
   });
@@ -269,7 +273,7 @@ class EnhancedLayout extends StatelessWidget {
             if (st.navigating && shows(DriveSection.turnBanner))
               Positioned(left: edge, top: hudBottom + 8 * unit, child: TurnBanner(uiState: st, unit: unit)),
             if (st.navigating && shows(DriveSection.miniMap))
-              Positioned(left: edge, bottom: edge, child: MiniMap(uiState: st, unit: unit)),
+              Positioned(left: edge, bottom: edge, child: MiniMap(uiState: st, unit: unit, light: mapStyle == MapStyle.streets)),
 
             // steering readout, bottom left (the mini map takes its place while navigating)
             if (shows(DriveSection.steering) && !(st.navigating && shows(DriveSection.miniMap)))

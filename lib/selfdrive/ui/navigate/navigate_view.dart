@@ -200,6 +200,7 @@ class _NavigateViewState extends State<NavigateView> {
           destination: picked == null ? null : (picked.lat, picked.lon),
           overview: showRoute && picked != null,
           tiles: widget.tiles,
+          light: widget.settings.mapStyle == MapStyle.streets,
         ),
         Positioned(left: 20 * u, top: 20 * u, bottom: showRoute ? null : 20 * u, width: 680 * u, child: panel),
       ]),

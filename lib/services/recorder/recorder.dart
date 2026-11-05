@@ -80,7 +80,8 @@ class Recorder extends ChangeNotifier {
   Timer? _ticker;
   Rect? _crop;
   bool _foreground = true;
-  bool _cameraHidden = false;
+  /// what covers the camera area ('Settings', 'Gallery', 'Navigate'), or null
+  String? _coveredBy;
   bool _starting = false;
   int _bufferSeconds;
 
@@ -135,14 +136,19 @@ class Recorder extends ChangeNotifier {
   }
 
   /// something covers the camera area (the Gallery): nothing new goes into the video meanwhile
-  void setCameraHidden(bool value) {
-    if (value == _cameraHidden) return;
-    _cameraHidden = value;
+  void setCameraHidden(bool value, {String by = 'A screen'}) => setCoveredBy(value ? by : null);
+
+  /// [what] covers the camera area (null: nothing); the clip shows it as "Recording paused"
+  void setCoveredBy(String? what) {
+    if (what == _coveredBy) return;
+    _coveredBy = what;
     _applyPause();
   }
 
   void _applyPause() {
-    if (state != RecordState.off) platform.setPaused(!_foreground || _cameraHidden);
+    if (state == RecordState.off) return;
+    final reason = !_foreground ? 'OPRivView is in the background' : (_coveredBy == null ? '' : '$_coveredBy open on the head unit');
+    platform.setPaused(!_foreground || _coveredBy != null, reason: reason);
   }
 
   /// start keeping the buffer (asks Android the first time this launch); call when connected
