@@ -2,8 +2,6 @@
 // navd's route, the truck (comma GPS) and the destination. Heading up while it follows the truck
 // (Gerry 2026-11-05); dragging stops following until the recentre button
 
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -77,13 +75,13 @@ class NavMapState extends State<NavMap> {
   }
 
   @override
-  void didUpdateWidget(NavMap old) {
-    super.didUpdateWidget(old);
-    if (old.uiState != st) {
-      old.uiState.removeListener(_changed);
+  void didUpdateWidget(NavMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.uiState != st) {
+      oldWidget.uiState.removeListener(_changed);
       st.addListener(_changed);
     }
-    if (old.overview != widget.overview) {
+    if (oldWidget.overview != widget.overview) {
       _fitted = false;
       following = !widget.overview;
       WidgetsBinding.instance.addPostFrameCallback((_) => _place());

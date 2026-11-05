@@ -99,10 +99,10 @@ class _AppShellState extends State<AppShell> {
   }
 
   @override
-  void didUpdateWidget(AppShell old) {
-    super.didUpdateWidget(old);
-    if (old.uiState != uiState) {
-      old.uiState.removeListener(_onUiState);
+  void didUpdateWidget(AppShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.uiState != uiState) {
+      oldWidget.uiState.removeListener(_onUiState);
       uiState.addListener(_onUiState);
     }
   }
