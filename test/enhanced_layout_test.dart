@@ -100,6 +100,34 @@ void main() {
       expect(s.torqueBarValue, closeTo(0.003 * 400 / 3, 1e-9));
     });
 
+    test('as the comma works it out: its max lateral accel, less the road\'s camber', () {
+      final s = UIState()
+        ..applyOpviewParams({'CarBrand': 'rivian', 'CarMaxLateralAccel': 2.5})
+        ..applyCarState({'vEgo': 30.0})
+        ..applyCarControl({'latActive': true})
+        // a gentle highway curve: 0.0004 1/m at 30 m/s is 0.36 m/s²
+        ..applyControlsState({'curvature': 0.00035, 'desiredCurvature': 0.0004, 'lateralControlState': {'angleState': {}}});
+      expect(s.maxLateralAccel, 2.5);
+      expect(s.torqueBarValue, closeTo(0.36 / 2.5, 1e-9));
+      // a road leaning 1.5° right does part of the turning on its own
+      s.applyVehicleParameters({'roll': 0.02618});
+      expect(s.torqueBarValue, closeTo((0.36 - 0.02618 * gravity) / 2.5, 1e-9));
+      // roll counts for less at low speed, nothing at 5 m/s
+      s.applyCarState({'vEgo': 5.0});
+      expect(s.torqueBarValue, closeTo(0.0004 * 25 / 2.5, 1e-9));
+      s.applyCarState({'vEgo': 10.0});
+      expect(s.torqueBarValue, closeTo((0.0004 * 100 - 0.02618 * gravity * 0.5) / 2.5, 1e-9));
+    });
+
+    test('max lateral accel: from carParams too; a missing or silly one keeps the default', () {
+      final s = UIState();
+      expect(s.maxLateralAccel, defaultMaxLatAccel);
+      s.applyCarParams({'brand': 'rivian', 'maxLateralAccel': 2.5});
+      expect(s.maxLateralAccel, 2.5);
+      s.applyOpviewParams({'CarMaxLateralAccel': 0});
+      expect(s.maxLateralAccel, 2.5);
+    });
+
     test('is limited to -1..1', () {
       final s = UIState();
       s.applyCarOutput({'actuatorsOutput': {'torque': -3.0}});

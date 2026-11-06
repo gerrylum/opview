@@ -121,6 +121,10 @@ class CerealAdapter implements TelemetryAdapter {
       case 'carParams':
         state.applyCarParams(data);
         return false;
+      case 'vehicleParameters':
+      case 'liveParameters': // renamed to vehicleParameters, roll the same
+        state.applyVehicleParameters(data);
+        return false;
       case 'carControl':
         state.applyCarControl(data);
         return false;

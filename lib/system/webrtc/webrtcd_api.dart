@@ -29,12 +29,14 @@ const bridgeServicesOut = [
   'gpsLocationExternal',    // Navigate: where the truck is
   'navInstruction',         // Navigate: navd's next turn
   'navRoute',               // Navigate: navd's route
+  'vehicleParameters',      // torque bar: road roll, as the comma's own bar uses
 ];
 
 // names used before openpilot renamed these services
 const legacyServiceNames = {
   'extrinsicsCalibration': 'liveCalibration',
   'narrowRoadCameraState': 'roadCameraState',
+  'vehicleParameters': 'liveParameters',
 };
 
 // most services a device could reject before we give up

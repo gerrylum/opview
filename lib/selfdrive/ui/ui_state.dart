@@ -36,6 +36,9 @@ const zeroTorqueHold = 3;
 /// mici torque_bar.py DEFAULT_MAX_LAT_ACCEL, m/s^2
 const defaultMaxLatAccel = 3.0;
 
+/// m/s², opendbc ACCELERATION_DUE_TO_GRAVITY
+const gravity = 9.81;
+
 /// how the wheel icon is tinted while MADS steers an angle-capable Rivian
 enum LateralMode { angle, torque }
 
@@ -215,6 +218,14 @@ class UIState extends ChangeNotifier {
   // carParams / carControl / carOutput — for the Rivian angle/torque wheel tint
   String brand = '';
   int carFlags = 0;
+
+  /// the car's measured maximum lateral acceleration (carParams.maxLateralAccel, 2.5 m/s² on a
+  /// Rivian): full scale on the torque bar. webrtcd sends it with the params once it has it
+  double maxLateralAccel = defaultMaxLatAccel;
+
+  /// road roll from vehicleParameters (radians, positive is the road leaning right); the torque
+  /// bar takes out what the camber alone asks for
+  double roll = 0.0;
   bool latActive = false;
   bool longActive = false;
 
@@ -505,6 +516,8 @@ class UIState extends ChangeNotifier {
     // car make and flags (carParams is only published every ~50 s)
     brand = data['CarBrand'] as String? ?? brand;
     carFlags = (data['CarFlags'] as num?)?.toInt() ?? carFlags;
+    final maxLat = (data['CarMaxLateralAccel'] as num?)?.toDouble();
+    if (maxLat != null && maxLat.isFinite && maxLat > 0.1) maxLateralAccel = maxLat;
     final navOn = data['NavigationEnabled'];
     if (navOn is bool) navigationEnabled = navOn;
     if (data.containsKey('NavDestination')) {
@@ -545,6 +558,14 @@ class UIState extends ChangeNotifier {
   void applyCarParams(Map<String, dynamic> data) {
     brand = data['brand'] as String? ?? '';
     carFlags = (data['flags'] as num?)?.toInt() ?? 0;
+    final maxLat = (data['maxLateralAccel'] as num?)?.toDouble();
+    if (maxLat != null && maxLat.isFinite && maxLat > 0.1) maxLateralAccel = maxLat;
+  }
+
+  /// vehicleParameters (liveParameters on older openpilot): the road's roll, for the torque bar
+  void applyVehicleParameters(Map<String, dynamic> data) {
+    roll = (data['roll'] as num?)?.toDouble() ?? 0.0;
+    // no notify — picked up on next modelV2
   }
 
   /// mici driver_state.py get_driver_data + _update_state
@@ -714,14 +735,21 @@ class UIState extends ChangeNotifier {
     return null;
   }
 
-  /// steering effort for the Enhanced layout's torque bar, -1..1 (mici torque_bar.py).
-  /// angle and curvature control have no torque, so the device estimates it from
-  /// lateral acceleration; it also removes road roll, which opview is not sent
+  /// steering effort for the Enhanced layout's torque bar, -1..1, worked out as the comma's own
+  /// bar does (mici torque_bar.py). Angle and curvature control (every EVPilot Rivian: controlsd
+  /// publishes angleState) have no torque to show, so it is estimated: the lateral acceleration
+  /// the car is making, plus what it is still short of, less what the road's camber does on its
+  /// own (faded in from 5 to 15 m/s, where roll is trustworthy), over the car's maximum
   double get torqueBarValue {
     if (lateralControlKind == 'angleState' || lateralControlKind == 'curvatureState') {
       if (!latActive) return 0.0;
-      final desiredLateralAccel = desiredCurvature * vEgo * vEgo;
-      return (desiredLateralAccel / defaultMaxLatAccel).clamp(-1.0, 1.0).toDouble();
+      final v2 = vEgo * vEgo;
+      final actual = curvature * v2;
+      final desired = desiredCurvature * v2;
+      final rollFade = ((vEgo - 5) / 10).clamp(0.0, 1.0);
+      final rollCompensation = roll * gravity * rollFade;
+      final value = (actual - rollCompensation + (desired - actual)) / maxLateralAccel;
+      return value.clamp(-1.0, 1.0).toDouble();
     }
     return (-torqueOutput).clamp(-1.0, 1.0).toDouble();
   }
