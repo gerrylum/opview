@@ -9,6 +9,8 @@
     <!-- Record: the screen capture runs in a foreground service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
+    <!-- Share › OPRivView from Google Maps: bring the running app to the front -->
+    <uses-permission android:name="android.permission.REORDER_TASKS"/>
 
     <!-- remove permissions leaked by flutter_webrtc (we don't need camera/mic/location) -->
     <uses-permission android:name="android.permission.CAMERA" tools:node="remove"/>
@@ -58,6 +60,20 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <!-- Share › OPRivView (a place from Google Maps); passes it to MainActivity and closes -->
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:label="OPRivView"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
             </intent-filter>
         </activity>
         <meta-data

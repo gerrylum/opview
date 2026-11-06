@@ -37,6 +37,9 @@ class MainActivity: FlutterActivity() {
     private val REQUEST_CAPTURE = 4101
     private val main = Handler(Looper.getMainLooper())
 
+    // Share › OPRivView from Google Maps (ShareActivity, ShareHub)
+    private val SHARE_CHANNEL = "org.dragonpilot.opview/share"
+
     // shrink to a picture-in-picture window on Home; Dart turns this on while connected
     private var pipEnabled = false
 
@@ -78,6 +81,13 @@ class MainActivity: FlutterActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
+    override fun onDestroy() {
+        // shares go back to starting the app until this one's Flutter side is up again
+        ShareHub.deliver = null
+        ShareHub.taskId = -1
+        super.onDestroy()
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
@@ -95,6 +105,19 @@ class MainActivity: FlutterActivity() {
         }
 
         setUpRecorder(MethodChannel(flutterEngine.dartExecutor.binaryMessenger, RECORDER_CHANNEL))
+
+        val share = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SHARE_CHANNEL)
+        share.setMethodCallHandler { call, result ->
+            if (call.method == "takeShared") {
+                // a share that started the app
+                result.success(ShareHub.pending)
+                ShareHub.pending = null
+            } else {
+                result.notImplemented()
+            }
+        }
+        ShareHub.taskId = taskId
+        ShareHub.deliver = { text -> main.post { share.invokeMethod("shared", text) } }
 
         val system = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SYSTEM_CHANNEL)
         systemChannel = system

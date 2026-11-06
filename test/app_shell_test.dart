@@ -10,6 +10,8 @@ import 'package:opview/selfdrive/ui/shell/menu_rail.dart';
 import 'package:opview/selfdrive/ui/shell/status_bar.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
+import 'package:opview/services/nav/places.dart';
+import 'package:opview/services/nav/shared_place.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:opview/services/recorder/recorder.dart';
 import 'golden/mock_ui_state.dart';
@@ -184,6 +186,58 @@ void main() {
       expect(tester.getRect(find.byKey(const ValueKey('menuLogo'))), logo);
       expect(find.byKey(const ValueKey('navSearchWide')), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a place shared from Google Maps opens Navigate and goes to the comma', (tester) async {
+      _screen(tester, 1920, 1000);
+      final shared = SharedPlaces();
+      final sent = <(double, double)?>[];
+      await tester.pumpWidget(MaterialApp(
+        home: AppShell(
+          uiState: _withDevice(),
+          settings: AppSettings(),
+          mapTiles: false,
+          sharedPlaces: shared,
+          sendNavDestination: (d) async {
+            sent.add(d);
+            return true;
+          },
+          resolveShared: (text) async => const Place(name: 'Shared Cafe', address: '1 Main St', lat: 49.28, lon: -123.12),
+        ),
+      ));
+      expect(find.byKey(const ValueKey('navigateView')), findsNothing);
+      shared.add('Shared Cafe\nhttps://maps.app.goo.gl/x');
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('navigateView')), findsOneWidget);
+      expect(tester.widget<MenuRail>(find.byType(MenuRail)).active, MenuItem.navigate);
+      expect(sent, [(49.28, -123.12)]);
+      expect(find.byKey(const ValueKey('navRouteCard')), findsOneWidget);
+      expect(shared.take(), isNull);  // taken
+    });
+
+    testWidgets('a share that came in before the screen was up is opened when it is', (tester) async {
+      _screen(tester, 1920, 1000);
+      final shared = SharedPlaces()..add('https://maps.app.goo.gl/x');
+      final sent = <(double, double)?>[];
+      await tester.pumpWidget(MaterialApp(
+        home: AppShell(
+          uiState: _withDevice(),
+          settings: AppSettings(),
+          mapTiles: false,
+          sharedPlaces: shared,
+          sendNavDestination: (d) async {
+            sent.add(d);
+            return true;
+          },
+          resolveShared: (text) async => const Place(name: 'Shared Cafe', address: '', lat: 49.28, lon: -123.12),
+        ),
+      ));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      expect(sent, [(49.28, -123.12)]);
     });
 
     testWidgets('Navigate without a MapTiler key: Add key opens Settings at Navigation', (tester) async {

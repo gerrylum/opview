@@ -7,6 +7,9 @@
 //   already routing: the current route's card with End route
 //   typing: while the keyboard is up the search goes wide across the top, results three across
 //           above the keyboard (Gerry 2026-11-05, mockup K1); the rest of the app keeps its size
+//   shared from Google Maps (Share › OPRivView, or a Maps link pasted into the search): the place
+//           is picked as if from the results, so it goes to the comma at once (Gerry 2026-11-06)
+//   not connected: a picked place waits and goes to the comma once it connects
 //   no MapTiler key: a card saying how to get one, in place of the search (the driver's own key,
 //           Settings > Navigation; the builds carry none)
 //
@@ -21,11 +24,15 @@ import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
 import 'package:opview/services/nav/maptiler.dart';
 import 'package:opview/services/nav/places.dart';
+import 'package:opview/services/nav/shared_place.dart';
 
 typedef PlaceSearch = Future<List<Place>> Function(String query, double? lat, double? lon);
 
 /// sends a destination to the comma (null clears it); false when not connected
 typedef SendDestination = Future<bool> Function((double, double)? destination);
+
+/// finds the place in a share or a pasted Google Maps link; throws a StateError saying why not
+typedef SharedPlaceResolver = Future<Place> Function(String text);
 
 /// how long the card waits for navd before saying why there may be no route
 const navPlanningPatience = Duration(seconds: 20);
@@ -53,6 +60,15 @@ class NavigateView extends StatefulWidget {
   /// opens Settings > Navigation to add a MapTiler key
   final VoidCallback? onAddKey;
 
+  /// a place shared from Google Maps, to open; [sharedId] counts shares, so the same place
+  /// shared twice is taken twice. [onSharedTaken] says it has been taken
+  final String? sharedText;
+  final int sharedId;
+  final VoidCallback? onSharedTaken;
+
+  /// replaceable in tests (Google's links and MapTiler otherwise)
+  final SharedPlaceResolver? resolveShared;
+
   const NavigateView({
     super.key,
     required this.uiState,
@@ -63,6 +79,10 @@ class NavigateView extends StatefulWidget {
     this.search,
     this.tiles = true,
     this.onAddKey,
+    this.sharedText,
+    this.sharedId = 0,
+    this.onSharedTaken,
+    this.resolveShared,
   });
 
   @override
@@ -90,6 +110,13 @@ class _NavigateViewState extends State<NavigateView> {
   /// searching for a new destination while one is being routed
   bool _newSearch = false;
 
+  /// a share being read ("Opening the place from Google Maps…"), or why it could not be
+  bool _opening = false;
+  String? _shareError;
+
+  /// picked while not connected: goes to the comma once it connects
+  Place? _waitingToSend;
+
   UIState get st => widget.uiState;
   double get u => widget.unit;
   String? get _key => widget.settings.mapTilerKey;
@@ -101,6 +128,57 @@ class _NavigateViewState extends State<NavigateView> {
   void initState() {
     super.initState();
     st.addListener(_changed);
+    if (widget.sharedText != null) _takeShareSoon();
+  }
+
+  @override
+  void didUpdateWidget(NavigateView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.sharedId != oldWidget.sharedId && widget.sharedText != null) _takeShareSoon();
+  }
+
+  // after this build: taking it changes the screen
+  void _takeShareSoon() {
+    final text = widget.sharedText!;
+    widget.onSharedTaken?.call();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _takeShare(text);
+    });
+  }
+
+  Future<Place> _resolve(String text) {
+    final r = widget.resolveShared;
+    if (r != null) return r(text);
+    return resolveSharedPlace(
+      text,
+      client: _client ??= http.Client(),
+      mapKey: _key,
+      lat: st.gpsFix ? st.gpsLat : null,
+      lon: st.gpsFix ? st.gpsLon : null,
+    );
+  }
+
+  /// opens the shared place: picked, so it goes to the comma, as a search result would
+  Future<void> _takeShare(String text) async {
+    _focus.unfocus();
+    setState(() {
+      _opening = true;
+      _shareError = null;
+      _picked = null;
+      _newSearch = st.navDestination != null;
+    });
+    try {
+      final p = await _resolve(text);
+      if (!mounted) return;
+      setState(() => _opening = false);
+      await _pick(p);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _opening = false;
+        _shareError = e is StateError ? e.message : 'Could not open that place';
+      });
+    }
   }
 
   @override
@@ -115,11 +193,17 @@ class _NavigateViewState extends State<NavigateView> {
 
   // the card follows navd (the route arriving, the comma's answer); 20 updates a second is
   // more than it needs, so only rebuild on what it shows
-  (bool, int, String?, (double, double)?, bool?)? _seen;
+  (bool, int, String?, (double, double)?, bool?, bool)? _seen;
   void _changed() {
-    final now = (st.navValid, st.navRoute.length, st.navDestinationError, st.navDestination, st.navigationEnabled);
+    final now = (st.navValid, st.navRoute.length, st.navDestinationError, st.navDestination, st.navigationEnabled, st.isConnected);
     if (now == _seen || !mounted) return;
     _seen = now;
+    // a place picked while not connected goes now
+    final waiting = _waitingToSend;
+    if (waiting != null && st.isConnected) {
+      _waitingToSend = null;
+      _send(waiting);
+    }
     setState(() {});
   }
 
@@ -134,6 +218,29 @@ class _NavigateViewState extends State<NavigateView> {
   void _onQuery(String text) {
     _debounce?.cancel();
     final q = text.trim();
+    // a Google Maps link pasted in: its place as the one result
+    if (looksLikeMapsLink(q)) {
+      setState(() {
+        _searching = true;
+        _searchError = null;
+      });
+      final id = ++_query;
+      _resolve(q).then((p) {
+        if (!mounted || id != _query) return;
+        setState(() {
+          _results = [p];
+          _searching = false;
+        });
+      }, onError: (Object e) {
+        if (!mounted || id != _query) return;
+        setState(() {
+          _results = const [];
+          _searching = false;
+          _searchError = e is StateError ? e.message : 'Could not open that link';
+        });
+      });
+      return;
+    }
     if (q.length < 3) {
       setState(() {
         _results = const [];
@@ -166,6 +273,7 @@ class _NavigateViewState extends State<NavigateView> {
 
   Future<void> _pick(Place p) async {
     FocusScope.of(context).unfocus();
+    _waitingToSend = null;  // the new place replaces one still waiting
     setState(() {
       _picked = p;
       _pickedAt = DateTime.now();
@@ -173,11 +281,22 @@ class _NavigateViewState extends State<NavigateView> {
       _newSearch = false;
     });
     widget.settings.addNavRecent(p);
+    await _send(p);
+  }
+
+  Future<void> _send(Place p) async {
     final ok = await widget.send((p.lat, p.lon));
-    if (!ok && mounted) setState(() => _sendError = 'Not connected to the comma');
+    if (!mounted) return;
+    if (ok) {
+      if (_sendError != null) setState(() => _sendError = null);
+    } else {
+      _waitingToSend = p;
+      setState(() => _sendError = 'Not connected to the comma: it goes as soon as it connects');
+    }
   }
 
   Future<void> _cancel() async {
+    _waitingToSend = null;
     await widget.send(null);
     if (!mounted) return;
     setState(() {
@@ -201,8 +320,11 @@ class _NavigateViewState extends State<NavigateView> {
     final current = st.navDestination;
     final picked = _picked;
     final Widget panel;
+    final sharing = picked == null && (_opening || _shareError != null);
     if (picked != null) {
       panel = _routeCard(picked, justPicked: true);
+    } else if (sharing) {
+      panel = _shareCard();
     } else if (current != null && !_newSearch) {
       panel = _routeCard(_currentPlace(current), justPicked: false);
     } else {
@@ -211,7 +333,7 @@ class _NavigateViewState extends State<NavigateView> {
     final showRoute = picked != null || (current != null && !_newSearch);
     // the keyboard is up over the search: go wide, in the space above it
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
-    final typing = !showRoute && _canSearch && keyboard > 0;
+    final typing = !showRoute && !sharing && _canSearch && keyboard > 0;
     return LayoutBuilder(builder: (context, c) {
       // Navigate starts at the top of the screen, so this much of it shows above the keyboard
       final above = (MediaQuery.sizeOf(context).height - keyboard).clamp(0.0, c.maxHeight).toDouble();
@@ -231,10 +353,41 @@ class _NavigateViewState extends State<NavigateView> {
             const ColoredBox(color: Color(0xB8000000)),
             Positioned(left: 24 * u, top: 22 * u, right: 24 * u, height: (above - 34 * u).clamp(0.0, above).toDouble(), child: _wideSearch()),
           ] else
-            Positioned(left: 20 * u, top: 20 * u, bottom: showRoute || !_canSearch ? null : 20 * u, width: 680 * u, child: panel),
+            Positioned(left: 20 * u, top: 20 * u, bottom: showRoute || sharing || !_canSearch ? null : 20 * u, width: 680 * u, child: panel),
         ]),
       );
     });
+  }
+
+  // -- a share from Google Maps --
+
+  Widget _shareCard() {
+    final error = _shareError;
+    return Container(
+      key: const ValueKey('navShareCard'),
+      padding: EdgeInsets.all(26 * u),
+      decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(24 * u)),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Icon(Icons.share_location, color: Colors.white70, size: 34 * u),
+          SizedBox(width: 14 * u),
+          Expanded(
+            child: Text(error == null ? 'Opening the place from Google Maps…' : 'Could not open that place',
+                style: TextStyle(color: Colors.white, fontSize: 28 * u, fontWeight: FontWeight.bold)),
+          ),
+          if (error == null) SizedBox(width: 30 * u, height: 30 * u, child: const CircularProgressIndicator(strokeWidth: 3)),
+        ]),
+        if (error != null) ...[
+          SizedBox(height: 12 * u),
+          Text(error, key: const ValueKey('navShareError'), style: TextStyle(color: const Color(0xFFFF6B6B), fontSize: 22 * u, height: 1.3)),
+          SizedBox(height: 18 * u),
+          _bigButton('OK', () => setState(() {
+                _shareError = null;
+                _newSearch = false;
+              }), key: 'navShareOk'),
+        ],
+      ]),
+    );
   }
 
   // -- no key --

@@ -7,6 +7,7 @@ import 'package:opview/selfdrive/ui/onroad/augmented_road_view.dart';
 import 'package:opview/selfdrive/ui/shell/app_shell.dart';
 import 'package:opview/services/app_settings.dart';
 import 'package:opview/services/connection_manager.dart';
+import 'package:opview/services/nav/shared_place.dart';
 import 'package:opview/services/recorder/recorder.dart';
 import 'package:opview/services/recorder/recorder_platform.dart';
 import 'package:opview/services/system_service.dart';
@@ -23,6 +24,9 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
   late final ConnectionManager _connectionManager;
   final AppSettings _settings = AppSettings();
   late final Recorder _recorder;
+
+  // Share › OPRivView from Google Maps
+  final _shared = SharedPlaces();
 
   // the app went fully into the background (not just PiP or the notification shade)
   final _lifecycle = LifecycleReconnect();
@@ -57,6 +61,7 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
     _settings.addListener(_applyCameraMode);
     listenForPip();
     _uiState.addListener(_updatePipOffer);
+    listenForShares(_shared);
   }
 
   @override
@@ -125,6 +130,7 @@ class _OpviewAppState extends State<OpviewApp> with WidgetsBindingObserver {
                 recorder: _recorder,
                 sendNavDestination: _connectionManager.sendNavDestination,
                 onReconnect: _connectionManager.reconnect,
+                sharedPlaces: _shared,
               ),
       ),
     );

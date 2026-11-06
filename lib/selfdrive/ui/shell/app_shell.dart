@@ -17,6 +17,7 @@ import 'package:opview/selfdrive/ui/shell/menu_rail.dart';
 import 'package:opview/selfdrive/ui/shell/status_bar.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
+import 'package:opview/services/nav/shared_place.dart';
 import 'package:opview/services/recorder/recorder.dart';
 import 'package:opview/services/updater.dart';
 
@@ -59,6 +60,12 @@ class AppShell extends StatefulWidget {
   /// Settings' updates; the app's own unless replaced (tests)
   final Updater? updater;
 
+  /// places shared from Google Maps (Share › OPRivView): each opens Navigate with it
+  final SharedPlaces? sharedPlaces;
+
+  /// reads a share; replaceable in tests (Google's links and MapTiler otherwise)
+  final SharedPlaceResolver? resolveShared;
+
   const AppShell({
     super.key,
     required this.uiState,
@@ -75,6 +82,8 @@ class AppShell extends StatefulWidget {
     this.onExit,
     this.onReconnect,
     this.updater,
+    this.sharedPlaces,
+    this.resolveShared,
   });
 
   @override
@@ -104,6 +113,10 @@ class _AppShellState extends State<AppShell> {
   ShellPage? _page;
   bool _hostIsManual = false;
   SettingsCategory _settingsAt = SettingsCategory.drivingView;
+
+  // the latest share for Navigate, until it takes it; the count tells one share from the next
+  String? _shareText;
+  int _shareId = 0;
   bool _wasConnected = false;
   bool _explaining = false;
 
@@ -116,6 +129,9 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     uiState.addListener(_onUiState);
     _onUiState();  // already connected
+    widget.sharedPlaces?.addListener(_onShared);
+    // one that arrived before this screen was built (starting up, or in picture-in-picture)
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onShared());
   }
 
   @override
@@ -125,11 +141,16 @@ class _AppShellState extends State<AppShell> {
       oldWidget.uiState.removeListener(_onUiState);
       uiState.addListener(_onUiState);
     }
+    if (oldWidget.sharedPlaces != widget.sharedPlaces) {
+      oldWidget.sharedPlaces?.removeListener(_onShared);
+      widget.sharedPlaces?.addListener(_onShared);
+    }
   }
 
   @override
   void dispose() {
     uiState.removeListener(_onUiState);
+    widget.sharedPlaces?.removeListener(_onShared);
     super.dispose();
   }
 
@@ -140,6 +161,22 @@ class _AppShellState extends State<AppShell> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _startBuffer());
     }
     _wasConnected = connected;
+  }
+
+  /// a place shared from Google Maps: Navigate opens and takes it
+  void _onShared() {
+    if (!mounted) return;
+    final text = widget.sharedPlaces?.take();
+    if (text == null) return;
+    if (widget.sendNavDestination == null) {
+      _note('Navigate is not available');
+      return;
+    }
+    setState(() {
+      _shareText = text;
+      _shareId++;
+    });
+    _show(ShellPage.navigate);
   }
 
   Future<void> _startBuffer() async {
@@ -284,6 +321,10 @@ class _AppShellState extends State<AppShell> {
                             search: widget.placeSearch,
                             tiles: widget.mapTiles,
                             onAddKey: () => _openSettings(at: SettingsCategory.navigation),
+                            sharedText: _shareText,
+                            sharedId: _shareId,
+                            onSharedTaken: () => _shareText = null,
+                            resolveShared: widget.resolveShared,
                           ),
                         if (_page == ShellPage.settings)
                           SettingsPage(

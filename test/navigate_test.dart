@@ -1,6 +1,8 @@
 // Navigate: MapTiler search, the comma's GPS / route / next turn, the Navigate screen, and the
 // turn banner and mini map on the driving view
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -256,7 +258,15 @@ void main() {
       closed = false;
     });
 
-    Future<void> show(WidgetTester tester, UIState st, {double w = 1770, double h = 916, bool searchable = true, VoidCallback? onAddKey}) async {
+    Future<void> show(WidgetTester tester, UIState st,
+        {double w = 1770,
+        double h = 916,
+        bool searchable = true,
+        VoidCallback? onAddKey,
+        String? shared,
+        int sharedId = 0,
+        bool connected = true,
+        SharedPlaceResolver? resolve}) async {
       _screen(tester, w, h);
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
@@ -267,11 +277,19 @@ void main() {
             unit: w / 1770,
             tiles: false,
             send: (d) async {
+              if (!st.isConnected && !connected) return false;
               sent.add(d);
               return true;
             },
             onClose: () => closed = true,
             onAddKey: onAddKey,
+            sharedText: shared,
+            sharedId: sharedId,
+            resolveShared: resolve ??
+                (text) async {
+                  if (text.contains('broken')) throw StateError('That link has no location in it');
+                  return const Place(name: 'Shared Cafe', address: '1 Main St', lat: 49.28, lon: -123.12);
+                },
             search: searchable ? ((q, lat, lon) async => q.toLowerCase().startsWith('cost') ? [_costco, _gas] : <Place>[]) : null,
           ),
         ),
@@ -467,6 +485,77 @@ void main() {
           await tester.pump();
           expect(tester.takeException(), isNull, reason: '${w}x$h, keyboard $kb');
         }
+      });
+    });
+
+    group('shared from Google Maps', () {
+      testWidgets('a share opens its place and sends it to the comma, like picking a result', (tester) async {
+        await show(tester, createMockUIState(), shared: 'Shared Cafe\nhttps://maps.app.goo.gl/x', sharedId: 1);
+        await tester.pump();  // taken after the first frame
+        await tester.pump();
+        expect(sent, [(49.28, -123.12)]);
+        expect(find.byKey(const ValueKey('navRouteCard')), findsOneWidget);
+        expect(find.text('Shared Cafe'), findsOneWidget);
+        expect(settings.navRecents.first.name, 'Shared Cafe');
+      });
+
+      testWidgets('while it is read: a card says so', (tester) async {
+        final done = Completer<Place>();
+        await show(tester, createMockUIState(), shared: 'https://maps.app.goo.gl/x', sharedId: 1, resolve: (_) => done.future);
+        await tester.pump();
+        expect(find.byKey(const ValueKey('navShareCard')), findsOneWidget);
+        expect(find.text('Opening the place from Google Maps…'), findsOneWidget);
+        done.complete(const Place(name: 'Shared Cafe', address: '', lat: 49.28, lon: -123.12));
+        await tester.pump();
+        await tester.pump();
+        expect(find.byKey(const ValueKey('navRouteCard')), findsOneWidget);
+      });
+
+      testWidgets('one that cannot be read says why; OK goes back', (tester) async {
+        await show(tester, createMockUIState(), shared: 'broken', sharedId: 1);
+        await tester.pump();
+        await tester.pump();
+        expect(sent, isEmpty);
+        expect(find.byKey(const ValueKey('navShareError')), findsOneWidget);
+        expect(find.text('That link has no location in it'), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('navShareOk')));
+        await tester.pump();
+        expect(find.byKey(const ValueKey('navSearchPanel')), findsOneWidget);
+      });
+
+      testWidgets('works without a MapTiler key', (tester) async {
+        await show(tester, createMockUIState(), searchable: false, shared: 'https://maps.app.goo.gl/x', sharedId: 1);
+        await tester.pump();
+        await tester.pump();
+        expect(sent, [(49.28, -123.12)]);
+        expect(find.byKey(const ValueKey('navRouteCard')), findsOneWidget);
+      });
+
+      testWidgets('a Google Maps link pasted into the search is its place, as a result to tap', (tester) async {
+        await show(tester, createMockUIState());
+        await tester.enterText(find.byKey(const ValueKey('navSearchField')), 'https://maps.app.goo.gl/x');
+        await tester.pump();
+        await tester.pump();
+        expect(find.byKey(const ValueKey('navResult_Shared Cafe')), findsOneWidget);
+        expect(sent, isEmpty);
+        await tester.tap(find.byKey(const ValueKey('navResult_Shared Cafe')));
+        await tester.pump();
+        expect(sent, [(49.28, -123.12)]);
+      });
+
+      testWidgets('not connected: the place waits, and goes once the comma connects', (tester) async {
+        final st = createMockUIState()..isConnected = false;
+        await show(tester, st, shared: 'https://maps.app.goo.gl/x', sharedId: 1, connected: false);
+        await tester.pump();
+        await tester.pump();
+        expect(sent, isEmpty);
+        expect(find.textContaining('it goes as soon as it connects'), findsOneWidget);
+        st.isConnected = true;
+        st.notifyNow();
+        await tester.pump();
+        await tester.pump();
+        expect(sent, [(49.28, -123.12)]);
+        expect(find.textContaining('it goes as soon as it connects'), findsNothing);
       });
     });
 
