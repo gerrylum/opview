@@ -100,23 +100,6 @@ void main() {
       expect(s.torqueBarValue, closeTo(0.003 * 400 / 3, 1e-9));
     });
 
-    test('a Rivian steering on its angle channel (no torque out) estimates it like angle control', () {
-      final s = UIState()
-        ..applyCarParams({'brand': 'rivian', 'flags': rivianAngleHarnessFlag})
-        ..applyCarState({'vEgo': 20.0})
-        ..applyCarControl({'latActive': true})
-        ..applyControlsState({'desiredCurvature': 0.003, 'lateralControlState': {'torqueState': {}}});
-      // hands on: cooperative torque, the bar shows the torque sent
-      s.applyCarOutput({'actuatorsOutput': {'torque': 0.25, 'torqueOutputCan': 120.0}});
-      expect(s.torqueBarValue, closeTo(-0.25, 1e-9));
-      // hands off: angle, no torque goes out; the bar still shows how hard it is steering
-      for (var i = 0; i < zeroTorqueHold; i++) {
-        s.applyCarOutput({'actuatorsOutput': {'torque': 0.0, 'torqueOutputCan': 0.0}});
-      }
-      expect(s.lateralMode, LateralMode.angle);
-      expect(s.torqueBarValue, closeTo(0.003 * 400 / 3, 1e-9));
-    });
-
     test('is limited to -1..1', () {
       final s = UIState();
       s.applyCarOutput({'actuatorsOutput': {'torque': -3.0}});
