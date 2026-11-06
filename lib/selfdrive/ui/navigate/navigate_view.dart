@@ -376,7 +376,8 @@ class _NavigateViewState extends State<NavigateView> {
         crossAxisCount: columns,
         mainAxisSpacing: 14 * u,
         crossAxisSpacing: 14 * u,
-        mainAxisExtent: 98 * u,
+        // the card's two lines and padding, with room to spare (fonts measure taller than their size)
+        mainAxisExtent: 116 * u,
       ),
       itemCount: _results.length,
       itemBuilder: (_, i) => _result(_results[i], selected: i == 0),
@@ -468,7 +469,7 @@ class _NavigateViewState extends State<NavigateView> {
             Icon(Icons.place_outlined, color: Colors.white70, size: 34 * u),
             SizedBox(width: 18 * u),
             Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.white, fontSize: 26 * u, fontWeight: FontWeight.bold)),
                 SizedBox(height: 4 * u),
                 Text(p.address, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: const Color(0xFFBFBFBF), fontSize: 19 * u)),
