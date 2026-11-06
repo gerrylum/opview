@@ -39,8 +39,8 @@ class NavMap extends StatefulWidget {
   /// MapTiler's light street map instead of the dark one (Settings > Navigation)
   final bool light;
 
-  /// draw the MapTiler tiles (off in tests, and without a key)
-  final bool tiles;
+  /// the driver's MapTiler key for the tiles; none (or in tests) draws the map without them
+  final String? mapKey;
 
   const NavMap({
     super.key,
@@ -51,8 +51,10 @@ class NavMap extends StatefulWidget {
     this.overview = false,
     this.zoom = navFollowZoom,
     this.light = false,
-    this.tiles = hasMapKey,
+    this.mapKey,
   });
+
+  bool get tiles => mapKey != null;
 
   @override
   State<NavMap> createState() => NavMapState();
@@ -190,7 +192,7 @@ class NavMapState extends State<NavMap> {
           children: [
             if (widget.tiles)
               TileLayer(
-                urlTemplate: widget.light ? mapTileUrlLight : mapTileUrl,
+                urlTemplate: mapTileUrl(widget.mapKey!, light: widget.light),
                 userAgentPackageName: 'OPRivView',
                 tileProvider: _tileProvider,
                 maxZoom: 19,
@@ -237,7 +239,7 @@ class NavMapState extends State<NavMap> {
       if (!widget.tiles)
         Center(
           child: Text(
-            hasMapKey ? '' : 'No map in this build (no MapTiler key)',
+            'No map: add a MapTiler key in Settings › Navigation',
             key: const ValueKey('navNoKey'),
             style: TextStyle(color: const Color(0x99FFFFFF), fontSize: 20 * u),
           ),

@@ -161,6 +161,45 @@ void main() {
       expect(find.byType(EnhancedSteeringPills), findsNothing);
     });
 
+    testWidgets('the keyboard covers the bottom of the screen: nothing shrinks, Navigate goes wide above it', (tester) async {
+      _screen(tester, 1920, 1000);
+      final settings = AppSettings()..mapTilerKey = 'abcDEF1234567890';
+      await tester.pumpWidget(MaterialApp(
+        home: AppShell(
+          uiState: _withDevice(),
+          settings: settings,
+          sendNavDestination: (_) async => true,
+          mapTiles: false,
+          placeSearch: (q, lat, lon) async => [],
+        ),
+      ));
+      await tester.tap(find.byKey(const ValueKey('menu_navigate')));
+      await tester.pump();
+      final rail = tester.getRect(find.byType(MenuRail));
+      final logo = tester.getRect(find.byKey(const ValueKey('menuLogo')));
+      tester.view.viewInsets = const FakeViewPadding(bottom: 450);
+      addTearDown(tester.view.resetViewInsets);
+      await tester.pump();
+      expect(tester.getRect(find.byType(MenuRail)), rail);
+      expect(tester.getRect(find.byKey(const ValueKey('menuLogo'))), logo);
+      expect(find.byKey(const ValueKey('navSearchWide')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Navigate without a MapTiler key: Add key opens Settings at Navigation', (tester) async {
+      _screen(tester, 1920, 1000);
+      await tester.pumpWidget(MaterialApp(
+        home: AppShell(uiState: _withDevice(), settings: AppSettings(), sendNavDestination: (_) async => true, mapTiles: false),
+      ));
+      await tester.tap(find.byKey(const ValueKey('menu_navigate')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('navAddKey')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('settingsPage')), findsOneWidget);
+      expect(find.byKey(const ValueKey('settingsBody_navigation')), findsOneWidget);
+      expect(find.byKey(const ValueKey('mapKeyAdd')), findsOneWidget);
+    });
+
     testWidgets('Navigate without a connection to send to says so', (tester) async {
       _screen(tester, 1920, 1000);
       await tester.pumpWidget(_shell(_withDevice(), AppSettings()));

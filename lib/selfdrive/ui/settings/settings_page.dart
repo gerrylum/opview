@@ -4,7 +4,8 @@
 //                   speed limit sign
 //   Display         brightness, clock, keep the screen on
 //   Recording       Keep the last, storage limit, what is stored, delete unstarred clips
-//   Navigation      the comma's navigation and GPS, Home / Work, recent places, map style
+//   Navigation      the driver's MapTiler key, the comma's navigation and GPS, Home / Work, recent
+//                   places, map style
 //   Comma device    the connection, the comma's own settings (read only), camera, reconnect
 //   Updates & about in-app updates, version, licences
 // Sizes are in the redesign mockup's pixels (1920x1000), scaled by `unit`
@@ -12,9 +13,12 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:opview/selfdrive/ui/shell/menu_rail.dart' show formatRecordingTime;
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
+import 'package:opview/services/nav/maptiler.dart';
 import 'package:opview/services/nav/places.dart';
 import 'package:opview/services/recorder/clip_store.dart';
 import 'package:opview/services/recorder/recorder.dart';
@@ -70,6 +74,10 @@ class SettingsPage extends StatefulWidget {
   final VoidCallback? onChangeHost;
   final VoidCallback? onReconnect;
 
+  /// tries a MapTiler key before it is saved: null when it works, otherwise why not (a real
+  /// request to MapTiler unless replaced, in tests)
+  final Future<String?> Function(String key)? checkMapKey;
+
   /// this build's name, under the categories
   final String? build;
 
@@ -87,6 +95,7 @@ class SettingsPage extends StatefulWidget {
     this.hostIsManual = false,
     this.onChangeHost,
     this.onReconnect,
+    this.checkMapKey,
     this.build,
     this.initial = SettingsCategory.drivingView,
   });
@@ -412,7 +421,32 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     }
     final navOn = st.navigationEnabled;
+    final key = s.mapTilerKey;
     return _columns([
+      _cardBox('MAPTILER KEY', [
+        Row(children: [
+          Container(
+            width: 14 * u,
+            height: 14 * u,
+            decoration: BoxDecoration(color: key == null ? _amber : _green, shape: BoxShape.circle),
+          ),
+          SizedBox(width: 12 * u),
+          Expanded(
+            child: Text(key == null ? 'Not set: the map and search are off' : 'Your key ··· ${key.length > 4 ? key.substring(key.length - 4) : key}',
+                key: const ValueKey('mapKeyStatus'),
+                maxLines: 2,
+                style: TextStyle(color: Colors.white, fontSize: 24 * u, fontWeight: FontWeight.bold)),
+          ),
+          SizedBox(width: 12 * u),
+          if (key == null)
+            _button('Add key…', _editMapKey, primary: true, key: 'mapKeyAdd')
+          else ...[
+            _button('Change…', _editMapKey, key: 'mapKeyChange'),
+            SizedBox(width: 10 * u),
+            _button('Remove', () => s.setMapTilerKey(null), key: 'mapKeyRemove'),
+          ],
+        ]),
+      ], sub: mapTilerKeyHelp),
       _cardBox('ON THE COMMA', [
         _valueRow('Navigation', navOn == null ? '–' : (navOn ? 'on' : 'off: turn it on on the comma'),
             color: navOn == true ? _green : (navOn == false ? _amber : _value), sub: 'The comma plans the route (needs prime and a GPS fix)'),
@@ -433,6 +467,86 @@ class _SettingsPageState extends State<SettingsPage> {
         _valueRow('Map data', '© MapTiler © OpenStreetMap'),
       ], sub: 'Navigate\'s map and the mini map while driving'),
     ]);
+  }
+
+  /// asks for a MapTiler key, tries it, and saves it once it works
+  Future<void> _editMapKey() async {
+    final field = TextEditingController();
+    final check = widget.checkMapKey;
+    http.Client? client;
+    String? error;
+    var checking = false;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(builder: (context, setDialog) {
+        Future<void> save() async {
+          setDialog(() {
+            checking = true;
+            error = null;
+          });
+          final k = field.text.trim();
+          final why = check != null ? await check(k) : await checkMapTilerKey(client ??= http.Client(), k);
+          if (!dialogContext.mounted) return;
+          if (why == null) {
+            await s.setMapTilerKey(k);
+            if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+          } else {
+            setDialog(() {
+              checking = false;
+              error = why;
+            });
+          }
+        }
+
+        Future<void> paste() async {
+          final clip = await Clipboard.getData(Clipboard.kTextPlain);
+          final t = clip?.text?.trim();
+          if (t != null && t.isNotEmpty) setDialog(() => field.text = t);
+        }
+
+        return AlertDialog(
+          key: const ValueKey('mapKeyDialog'),
+          backgroundColor: const Color(0xFF16171A),
+          title: const Text('MapTiler key'),
+          content: SizedBox(
+            width: 640,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              const Text(mapTilerKeyHelp, style: TextStyle(color: _label)),
+              const SizedBox(height: 16),
+              Row(children: [
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('mapKeyField'),
+                    controller: field,
+                    autofocus: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    onSubmitted: (_) => checking ? null : save(),
+                    decoration: const InputDecoration(hintText: 'Paste your key'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                TextButton(key: const ValueKey('mapKeyPaste'), onPressed: paste, child: const Text('Paste')),
+              ]),
+              if (checking) ...[
+                const SizedBox(height: 14),
+                const Text('Trying the key with MapTiler…', style: TextStyle(color: _label)),
+              ],
+              if (error != null) ...[
+                const SizedBox(height: 14),
+                Text(error!, key: const ValueKey('mapKeyError'), style: const TextStyle(color: Color(0xFFFF6B6B))),
+              ],
+            ]),
+          ),
+          actions: [
+            TextButton(key: const ValueKey('mapKeyCancel'), onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('Cancel')),
+            FilledButton(key: const ValueKey('mapKeySave'), onPressed: checking ? null : save, child: const Text('Test & save')),
+          ],
+        );
+      }),
+    );
+    client?.close();
+    // the controller is left to go with the dialog: it is still drawn while the dialog fades out
   }
 
   Widget _placeRow(String label, Place? p, VoidCallback clear, String key) =>

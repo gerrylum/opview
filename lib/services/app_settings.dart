@@ -66,6 +66,7 @@ const _speedLimitKey = 'speed_limit_display';
 const _clockKey = 'clock_mode';
 const _keepScreenOnKey = 'keep_screen_on';
 const _mapStyleKey = 'map_style';
+const _mapTilerKeyKey = 'maptiler_key';
 
 /// Navigate's map: MapTiler's dark or light street map
 enum MapStyle { dark, streets }
@@ -100,6 +101,10 @@ class AppSettings extends ChangeNotifier {
   bool keepScreenOn = true;
 
   MapStyle mapStyle = MapStyle.dark;
+
+  /// the driver's own MapTiler key (Settings > Navigation); without one Navigate's map and search
+  /// are off. Builds carry no key of their own
+  String? mapTilerKey;
   SpeedLimitDisplay speedLimitDisplay = SpeedLimitDisplay.auto;
   CameraMode cameraMode = CameraMode.auto;
 
@@ -142,6 +147,8 @@ class AppSettings extends ChangeNotifier {
     clockMode = clock == ClockMode.h24 ? ClockMode.h24 : ClockMode.h12;  // the settings offer these two
     keepScreenOn = prefs.getBool(_keepScreenOnKey) ?? true;
     mapStyle = _byName(MapStyle.values, prefs.getString(_mapStyleKey), MapStyle.dark);
+    final key = prefs.getString(_mapTilerKeyKey)?.trim();
+    mapTilerKey = key == null || key.isEmpty ? null : key;
     cameraMode = _byName(CameraMode.values, prefs.getString(_cameraModeKey), CameraMode.auto);
     hiddenSections.clear();
     final savedHidden = prefs.getStringList(_hiddenSectionsKey);
@@ -193,6 +200,21 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keepScreenOnKey, value);
+  }
+
+  /// save the driver's MapTiler key (checked first, Settings > Navigation), or remove it with null
+  Future<void> setMapTilerKey(String? value) async {
+    final v = value?.trim();
+    final key = v == null || v.isEmpty ? null : v;
+    if (key == mapTilerKey) return;
+    mapTilerKey = key;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (key == null) {
+      await prefs.remove(_mapTilerKeyKey);
+    } else {
+      await prefs.setString(_mapTilerKeyKey, key);
+    }
   }
 
   Future<void> setMapStyle(MapStyle value) async {

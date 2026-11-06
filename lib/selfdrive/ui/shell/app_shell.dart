@@ -17,7 +17,6 @@ import 'package:opview/selfdrive/ui/shell/menu_rail.dart';
 import 'package:opview/selfdrive/ui/shell/status_bar.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
-import 'package:opview/services/nav/maptiler.dart';
 import 'package:opview/services/recorder/recorder.dart';
 import 'package:opview/services/updater.dart';
 
@@ -104,6 +103,7 @@ String shellPageLabel(ShellPage page) => switch (page) {
 class _AppShellState extends State<AppShell> {
   ShellPage? _page;
   bool _hostIsManual = false;
+  SettingsCategory _settingsAt = SettingsCategory.drivingView;
   bool _wasConnected = false;
   bool _explaining = false;
 
@@ -189,7 +189,8 @@ class _AppShellState extends State<AppShell> {
 
   void _toggle(ShellPage page) => _show(_page == page ? null : page);
 
-  Future<void> _openSettings() async {
+  Future<void> _openSettings({SettingsCategory at = SettingsCategory.drivingView}) async {
+    _settingsAt = at;
     // whether the comma's address was typed in, for the Comma device page
     final manual = await widget.loadManualHost?.call();
     if (!mounted) return;
@@ -222,6 +223,10 @@ class _AppShellState extends State<AppShell> {
     final r = recorder;
     return Scaffold(
       backgroundColor: Colors.black,
+      // the keyboard covers the bottom of the screen rather than shrinking it: the app is sized
+      // to the screen (shellUnit), so a shorter body would draw everything smaller. Navigate's
+      // search makes room above the keyboard itself
+      resizeToAvoidBottomInset: false,
       body: LayoutBuilder(builder: (context, constraints) {
         final unit = shellUnit(constraints.biggest);
         final railW = menuRailWidth * unit;
@@ -265,6 +270,7 @@ class _AppShellState extends State<AppShell> {
                             settings: settings,
                             details: settings.detailsOpen,
                             onOpenSettings: _openSettings,
+                            mapTiles: widget.mapTiles,
                           ),
                         ),
                         if (_page == ShellPage.gallery && r != null) GalleryView(recorder: r, unit: unit, playback: widget.playback),
@@ -276,10 +282,13 @@ class _AppShellState extends State<AppShell> {
                             send: widget.sendNavDestination!,
                             onClose: () => _show(null),
                             search: widget.placeSearch,
-                            tiles: widget.mapTiles && hasMapKey,
+                            tiles: widget.mapTiles,
+                            onAddKey: () => _openSettings(at: SettingsCategory.navigation),
                           ),
                         if (_page == ShellPage.settings)
                           SettingsPage(
+                            key: ValueKey(_settingsAt),
+                            initial: _settingsAt,
                             settings: settings,
                             uiState: uiState,
                             unit: unit,

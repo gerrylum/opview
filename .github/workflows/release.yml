@@ -53,14 +53,11 @@ jobs:
         run: echo "BUILD_NUMBER=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
 
       - name: Build APK
-        # Navigate's map and search (the MapTiler key, restricted to OPRivView's User-Agent)
-        env:
-          MAPTILER_KEY: ${{ secrets.MAPTILER_KEY }}
+        # no MapTiler key in the build: each driver enters their own (Settings > Navigation)
         run: |
           version="${GITHUB_REF_NAME#v}"
           flutter build apk --release --build-name "$version" --build-number "$BUILD_NUMBER" \
-            --dart-define=OPVIEW_BUILD="$version" \
-            --dart-define=MAPTILER_KEY="$MAPTILER_KEY"
+            --dart-define=OPVIEW_BUILD="$version"
 
       # which key signed the APK. keytool cannot read it (the APK has only the v2/v3 signature
       # scheme, no JAR signature), so use the SDK's apksigner; informational, never fails the build

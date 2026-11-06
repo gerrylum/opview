@@ -3,6 +3,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:opview/selfdrive/ui/navigate/nav_map.dart';
 import 'package:opview/selfdrive/ui/navigate/navigate_view.dart';
 import 'package:opview/selfdrive/ui/navigate/turn_banner.dart';
@@ -78,7 +80,36 @@ void main() {
 
     test('requests say OPRivView, which the key is restricted to', () {
       expect(mapTilerUserAgent, contains('OPRivView'));
-      expect(mapTileUrl, startsWith('https://api.maptiler.com/maps/streets-v2-dark/256/{z}/{x}/{y}.png?key='));
+    });
+
+    test('tiles with the driver\'s key, dark or light', () {
+      expect(mapTileUrl('K1'), 'https://api.maptiler.com/maps/streets-v2-dark/256/{z}/{x}/{y}.png?key=K1');
+      expect(mapTileUrl('K1', light: true), 'https://api.maptiler.com/maps/streets-v2/256/{z}/{x}/{y}.png?key=K1');
+    });
+
+    test('a key is tried before it is saved', () async {
+      Uri? asked;
+      Map<String, String>? headers;
+      http.Client answering(int status) => MockClient((r) async {
+            asked = r.url;
+            headers = r.headers;
+            return http.Response('{"features":[]}', status);
+          });
+      expect(await checkMapTilerKey(answering(200), '  abcDEF1234567890 '), isNull);
+      expect(asked!.queryParameters['key'], 'abcDEF1234567890');
+      expect(headers!['User-Agent'], contains('OPRivView'));
+      expect(await checkMapTilerKey(answering(403), 'abcDEF1234567890'), contains('refused the key (403)'));
+      expect(await checkMapTilerKey(answering(429), 'abcDEF1234567890'), contains('free limit'));
+      expect(await checkMapTilerKey(answering(200), ''), 'Enter a key');
+      expect(await checkMapTilerKey(answering(200), 'not a key!'), contains("doesn't look like"));
+      final offline = MockClient((_) async => throw const SocketExceptionLike());
+      expect(await checkMapTilerKey(offline, 'abcDEF1234567890'), contains('Could not reach MapTiler'));
+    });
+
+    test('a refused search says why', () async {
+      final c = MockClient((_) async => http.Response('', 403));
+      expect(() => searchPlaces(c, 'abcDEF1234567890', 'costco'),
+          throwsA(isA<StateError>().having((e) => e.message, 'message', contains('refused the key'))));
     });
   });
 
@@ -181,7 +212,8 @@ void main() {
     testWidgets('navigating: the turn banner, and the mini map where the steering readout was', (tester) async {
       _screen(tester, 1920, 1080);
       final st = _routing();
-      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: st, settings: AppSettings())));
+      final settings = AppSettings()..mapTilerKey = 'testkey1234567890';
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: st, settings: settings, mapTiles: false)));
       expect(find.byKey(const ValueKey('turnBanner')), findsOneWidget);
       expect(find.text('0.3 mi'), findsOneWidget);
       expect(find.text('Red Hill Ave'), findsOneWidget);
@@ -189,6 +221,14 @@ void main() {
       expect(find.byKey(const ValueKey('miniMap')), findsOneWidget);
       expect(find.byType(EnhancedSteeringPills), findsNothing);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('without a MapTiler key: the turn banner, but no mini map', (tester) async {
+      _screen(tester, 1920, 1080);
+      await tester.pumpWidget(MaterialApp(home: AugmentedRoadView(uiState: _routing(), settings: AppSettings(), mapTiles: false)));
+      expect(find.byKey(const ValueKey('turnBanner')), findsOneWidget);
+      expect(find.byKey(const ValueKey('miniMap')), findsNothing);
+      expect(find.byType(EnhancedSteeringPills), findsOneWidget);
     });
 
     testWidgets('both can be turned off; not navigating shows neither', (tester) async {
@@ -216,10 +256,11 @@ void main() {
       closed = false;
     });
 
-    Future<void> show(WidgetTester tester, UIState st, {double w = 1770, double h = 916}) async {
+    Future<void> show(WidgetTester tester, UIState st, {double w = 1770, double h = 916, bool searchable = true, VoidCallback? onAddKey}) async {
       _screen(tester, w, h);
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
+          resizeToAvoidBottomInset: false,  // as in AppShell: the keyboard covers, nothing shrinks
           body: NavigateView(
             uiState: st,
             settings: settings,
@@ -230,7 +271,8 @@ void main() {
               return true;
             },
             onClose: () => closed = true,
-            search: (q, lat, lon) async => q.toLowerCase().startsWith('cost') ? [_costco, _gas] : [],
+            onAddKey: onAddKey,
+            search: searchable ? ((q, lat, lon) async => q.toLowerCase().startsWith('cost') ? [_costco, _gas] : <Place>[]) : null,
           ),
         ),
       ));
@@ -334,6 +376,100 @@ void main() {
       expect(sent, [(_costco.lat, _costco.lon)]);
     });
 
+    testWidgets('no MapTiler key: how to get one instead of the search, and a way to Settings', (tester) async {
+      var asked = 0;
+      await show(tester, createMockUIState(), searchable: false, onAddKey: () => asked++);
+      expect(find.byKey(const ValueKey('navNoKeyCard')), findsOneWidget);
+      expect(find.byKey(const ValueKey('navSearchField')), findsNothing);
+      expect(find.text('Navigation needs a MapTiler key'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('navAddKey')));
+      expect(asked, 1);
+      // with a key the search is back
+      await settings.setMapTilerKey('abcDEF1234567890');
+      await show(tester, createMockUIState(), searchable: false);
+      expect(find.byKey(const ValueKey('navNoKeyCard')), findsNothing);
+      expect(find.byKey(const ValueKey('navSearchField')), findsOneWidget);
+    });
+
+    testWidgets('a route the comma already has still shows without a key', (tester) async {
+      settings.navRecents = [_costco];
+      await show(tester, _routing(), searchable: false);
+      expect(find.byKey(const ValueKey('navRouteCard')), findsOneWidget);
+    });
+
+    group('typing, with the keyboard up', () {
+      void keyboard(WidgetTester tester, double height) {
+        tester.view.viewInsets = FakeViewPadding(bottom: height);
+        addTearDown(tester.view.resetViewInsets);
+      }
+
+      testWidgets('the search goes wide above the keyboard, results three across', (tester) async {
+        await show(tester, createMockUIState()..isMetric = false);
+        keyboard(tester, 450);
+        await tester.pump();
+        expect(find.byKey(const ValueKey('navSearchWide')), findsOneWidget);
+        expect(find.byKey(const ValueKey('navSearchPanel')), findsNothing);
+        // at full size, across the top
+        final field = tester.getRect(find.byKey(const ValueKey('navSearchField')));
+        expect(field.width, greaterThan(1300));
+        expect(field.top, lessThan(40));
+        await tester.enterText(find.byKey(const ValueKey('navSearchField')), 'costco');
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.pump();
+        expect(find.byKey(const ValueKey('navResultsGrid')), findsOneWidget);
+        final a = tester.getRect(find.byKey(const ValueKey('navResult_Costco Wholesale')));
+        final b = tester.getRect(find.byKey(const ValueKey('navResult_Costco Gasoline')));
+        expect(b.top, a.top);  // side by side
+        expect(b.left, greaterThan(a.right));
+        // everything above the keyboard
+        expect(a.bottom, lessThan(916 - 450));
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('the keyboard going away brings the side panel back, with what was typed', (tester) async {
+        await show(tester, createMockUIState());
+        keyboard(tester, 450);
+        await tester.pump();
+        await tester.enterText(find.byKey(const ValueKey('navSearchField')), 'costco');
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.pump();
+        await tester.tap(find.byKey(const ValueKey('navKeyboardCancel')));
+        tester.view.resetViewInsets();
+        await tester.pump();
+        expect(find.byKey(const ValueKey('navSearchPanel')), findsOneWidget);
+        expect(find.byKey(const ValueKey('navSearchWide')), findsNothing);
+        expect(find.text('costco'), findsOneWidget);
+        expect(find.byKey(const ValueKey('navResult_Costco Wholesale')), findsOneWidget);
+      });
+
+      testWidgets('picking a result goes to the route card', (tester) async {
+        await show(tester, createMockUIState());
+        keyboard(tester, 450);
+        await tester.pump();
+        await tester.enterText(find.byKey(const ValueKey('navSearchField')), 'costco');
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.pump();
+        await tester.tap(find.byKey(const ValueKey('navResult_Costco Gasoline')));
+        await tester.pump();
+        expect(sent, [(_gas.lat, _gas.lon)]);
+        expect(find.byKey(const ValueKey('navRouteCard')), findsOneWidget);
+        expect(find.byKey(const ValueKey('navSearchWide')), findsNothing);
+      });
+
+      testWidgets('fits a short screen and a tall keyboard', (tester) async {
+        settings.navHome = _costco;
+        for (final (w, h, kb) in const [(1770.0, 916.0, 600.0), (1208.0, 440.0, 220.0), (944.0, 555.0, 300.0)]) {
+          await show(tester, createMockUIState(), w: w, h: h);
+          keyboard(tester, kb);
+          await tester.pump();
+          await tester.enterText(find.byKey(const ValueKey('navSearchField')), 'costco');
+          await tester.pump(const Duration(milliseconds: 500));
+          await tester.pump();
+          expect(tester.takeException(), isNull, reason: '${w}x$h, keyboard $kb');
+        }
+      });
+    });
+
     testWidgets('no GPS yet: the map says so', (tester) async {
       await show(tester, createMockUIState());
       expect(find.byKey(const ValueKey('navNoGps')), findsOneWidget);
@@ -346,4 +482,9 @@ void main() {
       }
     });
   });
+}
+
+/// stands in for a network failure
+class SocketExceptionLike implements Exception {
+  const SocketExceptionLike();
 }

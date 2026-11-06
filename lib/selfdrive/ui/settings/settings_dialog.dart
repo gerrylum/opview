@@ -24,6 +24,7 @@ Future<void> showSettingsDialog(
   Updater? updater,
   Recorder? recorder,
   SettingsCategory initial = SettingsCategory.drivingView,
+  Future<String?> Function(String key)? checkMapKey,
 }) {
   final state = uiState ?? UIState();
   return showDialog<void>(
@@ -49,6 +50,7 @@ Future<void> showSettingsDialog(
                     onChangeHost();
                   },
             onReconnect: onReconnect,
+            checkMapKey: checkMapKey,
             build: build,
             initial: initial,
             onDone: () => Navigator.of(dialogContext).pop(),

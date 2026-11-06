@@ -4,7 +4,6 @@
 import 'package:flutter/material.dart';
 import 'package:opview/selfdrive/ui/navigate/nav_map.dart';
 import 'package:opview/selfdrive/ui/ui_state.dart';
-import 'package:opview/services/nav/maptiler.dart';
 import 'package:opview/services/nav/places.dart';
 
 const turnBannerWidth = 128.0;
@@ -90,10 +89,10 @@ class TurnBanner extends StatelessWidget {
 class MiniMap extends StatelessWidget {
   final UIState uiState;
   final double unit;
-  final bool tiles;
+  final String? mapKey;
   final bool light;
 
-  const MiniMap({super.key, required this.uiState, required this.unit, this.tiles = true, this.light = false});
+  const MiniMap({super.key, required this.uiState, required this.unit, required this.mapKey, this.light = false});
 
   @override
   Widget build(BuildContext context) {
@@ -108,7 +107,7 @@ class MiniMap extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       // the map's own sizes are in the 1920x1000 mockup's pixels: about a third of a comma four unit
-      child: NavMap(uiState: uiState, unit: u / 3.3, interactive: false, zoom: navMiniZoom, tiles: tiles && hasMapKey, light: light),
+      child: NavMap(uiState: uiState, unit: u / 3.3, interactive: false, zoom: navMiniZoom, mapKey: mapKey, light: light),
     );
   }
 }

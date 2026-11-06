@@ -141,6 +141,12 @@ class EnhancedLayout extends StatelessWidget {
   /// the mini map's style while navigating
   final MapStyle mapStyle;
 
+  /// the driver's MapTiler key: without one there is no mini map (the turn banner stays)
+  final String? mapKey;
+
+  /// load the mini map's tiles (off in tests)
+  final bool mapTiles;
+
   /// where the camera image goes and the matching overlay transform, for the whole
   /// screen; the same framing as the Classic layout
   final FrameTransform Function(double w, double h) frameFor;
@@ -153,6 +159,8 @@ class EnhancedLayout extends StatelessWidget {
     this.speedLimitDisplay = SpeedLimitDisplay.auto,
     this.hiddenSections = const {},
     this.mapStyle = MapStyle.dark,
+    this.mapKey,
+    this.mapTiles = true,
     required this.frameFor,
     required this.videoBuilder,
   });
@@ -167,6 +175,7 @@ class EnhancedLayout extends StatelessWidget {
       final edge = (enhancedBorderWidth + enhancedMargin) * unit;  // screen edge to corner elements
       final frame = frameFor(w, h);
       bool shows(DriveSection s) => !hiddenSections.contains(s);
+      final miniMap = st.navigating && shows(DriveSection.miniMap) && mapKey != null;
 
       // the road name tab hangs from the top border; the speed row sits just under it
       final roadShown = shows(DriveSection.roadName) && st.showRoadName;
@@ -271,11 +280,11 @@ class EnhancedLayout extends StatelessWidget {
             // navigating: the next turn under the speed row, and a small map where the steering readout goes
             if (st.navigating && shows(DriveSection.turnBanner))
               Positioned(left: edge, top: hudBottom + 8 * unit, child: TurnBanner(uiState: st, unit: unit)),
-            if (st.navigating && shows(DriveSection.miniMap))
-              Positioned(left: edge, bottom: edge, child: MiniMap(uiState: st, unit: unit, light: mapStyle == MapStyle.streets)),
+            if (miniMap)
+              Positioned(left: edge, bottom: edge, child: MiniMap(uiState: st, unit: unit, mapKey: mapTiles ? mapKey : null, light: mapStyle == MapStyle.streets)),
 
             // steering readout, bottom left (the mini map takes its place while navigating)
-            if (shows(DriveSection.steering) && !(st.navigating && shows(DriveSection.miniMap)))
+            if (shows(DriveSection.steering) && !miniMap)
               Positioned(
                 left: edge,
                 bottom: edge,

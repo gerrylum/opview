@@ -43,6 +43,9 @@ class AugmentedRoadView extends StatefulWidget {
   /// opens over the whole screen
   final VoidCallback? onOpenSettings;
 
+  /// load map tiles for the mini map (off in tests)
+  final bool mapTiles;
+
   const AugmentedRoadView({
     super.key,
     required this.uiState,
@@ -54,6 +57,7 @@ class AugmentedRoadView extends StatefulWidget {
     this.pip = false,
     this.details = false,
     this.onOpenSettings,
+    this.mapTiles = true,
   });
 
   @override
@@ -64,6 +68,7 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: false,  // the keyboard covers, nothing shrinks (app_shell.dart)
       backgroundColor: Colors.black,
       body: LayoutBuilder(builder: (context, constraints) {
         final screenH = constraints.maxHeight;
@@ -107,6 +112,8 @@ class _AugmentedRoadViewState extends State<AugmentedRoadView> {
                 speedLimitDisplay: speedLimitDisplay,
                 hiddenSections: settings?.hiddenSections ?? const <DriveSection>{},
                 mapStyle: settings?.mapStyle ?? MapStyle.dark,
+                mapKey: settings?.mapTilerKey,
+                mapTiles: widget.mapTiles,
                 frameFor: _fullScreenFrame,
                 videoBuilder: _videoLayer,
               ),

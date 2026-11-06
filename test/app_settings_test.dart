@@ -1,6 +1,7 @@
 // viewer-side settings: storage, the clock, and the settings dialog
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:opview/selfdrive/ui/onroad/clock_renderer.dart';
 import 'package:opview/selfdrive/ui/settings/settings_dialog.dart';
@@ -165,7 +166,12 @@ void main() {
     });
 
     Future<AppSettings> open(WidgetTester tester,
-        {String? host, bool manual = false, VoidCallback? onChange, SettingsCategory? page = SettingsCategory.comma, UIState? uiState}) async {
+        {String? host,
+        bool manual = false,
+        VoidCallback? onChange,
+        SettingsCategory? page = SettingsCategory.comma,
+        UIState? uiState,
+        Future<String?> Function(String key)? checkMapKey}) async {
       tester.view.physicalSize = const Size(1920, 1080);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -177,7 +183,7 @@ void main() {
           child: Builder(
             builder: (context) => TextButton(
               onPressed: () => showSettingsDialog(context, settings,
-                  uiState: uiState, host: host, hostIsManual: manual, onChangeHost: onChange, build: 'abc1234'),
+                  uiState: uiState, host: host, hostIsManual: manual, onChangeHost: onChange, build: 'abc1234', checkMapKey: checkMapKey),
               child: const Text('open'),
             ),
           ),
@@ -254,6 +260,8 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('settingsCat_navigation')));
       await tester.pumpAndSettle();
       expect(find.text('1 Main St'), findsOneWidget);
+      await tester.ensureVisible(find.byKey(const ValueKey('clearHome')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('clearHome')));
       await tester.pumpAndSettle();
       expect(settings.navHome, isNull);
@@ -262,6 +270,57 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('choice_mapStyle_Streets')));
       await tester.pumpAndSettle();
       expect(settings.mapStyle, MapStyle.streets);
+    });
+
+    testWidgets('Navigation: the MapTiler key is tried, then saved; Remove takes it away', (tester) async {
+      final tried = <String>[];
+      final settings = await open(tester, page: SettingsCategory.navigation, checkMapKey: (k) async {
+        tried.add(k);
+        return k == 'goodKEY1234567890' ? null : 'MapTiler refused the key (403)';
+      });
+      expect(find.text('Not set: the map and search are off'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('mapKeyAdd')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('mapKeyDialog')), findsOneWidget);
+
+      await tester.enterText(find.byKey(const ValueKey('mapKeyField')), 'badKEY1234567890');
+      await tester.tap(find.byKey(const ValueKey('mapKeySave')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('mapKeyError')), findsOneWidget);
+      expect(settings.mapTilerKey, isNull);  // not saved
+
+      await tester.enterText(find.byKey(const ValueKey('mapKeyField')), '  goodKEY1234567890 ');
+      await tester.tap(find.byKey(const ValueKey('mapKeySave')));
+      await tester.pumpAndSettle();
+      expect(tried, ['badKEY1234567890', 'goodKEY1234567890']);
+      expect(find.byKey(const ValueKey('mapKeyDialog')), findsNothing);
+      expect(settings.mapTilerKey, 'goodKEY1234567890');
+      expect(find.text('Your key ··· 7890'), findsOneWidget);
+      final again = AppSettings();
+      await again.load();
+      expect(again.mapTilerKey, 'goodKEY1234567890');
+
+      await tester.tap(find.byKey(const ValueKey('mapKeyRemove')));
+      await tester.pumpAndSettle();
+      expect(settings.mapTilerKey, isNull);
+      expect(find.byKey(const ValueKey('mapKeyAdd')), findsOneWidget);
+      final gone = AppSettings();
+      await gone.load();
+      expect(gone.mapTilerKey, isNull);
+    });
+
+    testWidgets('Paste puts the clipboard in the key field', (tester) async {
+      await open(tester, page: SettingsCategory.navigation, checkMapKey: (_) async => null);
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.getData') return {'text': ' pastedKEY1234567890 '};
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+      await tester.tap(find.byKey(const ValueKey('mapKeyAdd')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('mapKeyPaste')));
+      await tester.pumpAndSettle();
+      expect(find.text('pastedKEY1234567890'), findsOneWidget);
     });
 
     testWidgets('shows the comma address, how it was found, and the build', (tester) async {
