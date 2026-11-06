@@ -1,11 +1,13 @@
 // A place shared from Google Maps on the head unit (Share › OPRivView), or a Maps link pasted into
 // Navigate's search (Gerry 2026-11-06). The comma only needs the latitude and longitude, which
-// Google's links carry: Maps shares the place's name (and sometimes its address) and a short
-// maps.app.goo.gl link. That redirects to a google.com/maps link, which may hold the pin's
-// coordinates; if not, Google's page for it does, read as a desktop browser would (or the page
-// for the place's id, maps?cid=). Only when Google gives no location at all is the place looked up
-// by name with the driver's MapTiler key, near the truck, and then the driver picks the match:
-// a guess is never sent to the comma by itself (a share of a post office went to Alaska).
+// Google's links may carry: Maps shares the place's name (and sometimes its address) and a short
+// maps.app.goo.gl link, which redirects to a google.com/maps link. When that link holds the pin's
+// coordinates (or the map's centre on it), that is the place. Often it holds only Google's own id
+// for the place; Google's page for it is then no help: without its JavaScript it is a generic page
+// whose map is centred on where Google thinks the viewer is (every share went to the same spot near
+// Gerry, 2026-11-06), so pages are never read for coordinates. The place is then looked up by
+// name with the driver's MapTiler key, near the truck, and the driver picks the match: a guess is
+// never sent to the comma by itself (a share of a post office once went to Alaska).
 //
 // The Android side (ShareActivity.kt) passes the shared text on; SharedPlaces holds it until the
 // app's screen takes it.
@@ -142,34 +144,6 @@ String _decoded(String s) {
   return null;
 }
 
-/// the place's coordinates in a Google Maps page (as a desktop browser gets it): the pin, the
-/// map's starting view (APP_INITIALIZATION_STATE=[[[scale, longitude, latitude]: longitude
-/// first), or the preview image's centre. Pages carry other numbers, so nothing looser
-(double, double)? coordinatesInPage(String page) {
-  final body = page.length > 600000 ? page.substring(0, 600000) : page;
-  final pin = RegExp('!3d$_num!4d$_num').firstMatch(body);
-  if (pin != null) {
-    final p = _pair(pin.group(1)!, pin.group(2)!);
-    if (p != null) return p;
-  }
-  final start = RegExp(r'APP_INITIALIZATION_STATE=\[\[\[(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)\]').firstMatch(body);
-  if (start != null) {
-    final p = _pair(start.group(3)!, start.group(2)!);
-    if (p != null) return p;
-  }
-  final centre = RegExp('center=$_num(?:%2C|,)$_num').firstMatch(body);
-  if (centre != null) return _pair(centre.group(1)!, centre.group(2)!);
-  return null;
-}
-
-/// Google's own id for a place, from its feature id (0x…:0x… in a link's !1s or ftid=): the
-/// second half as a decimal, for maps.google.com/maps?cid=
-String? placeCid(String s) {
-  final m = RegExp(r'0x[0-9a-fA-F]+:0x([0-9a-fA-F]+)').firstMatch(s);
-  if (m == null) return null;
-  return BigInt.parse(m.group(1)!, radix: 16).toString();  // past a signed 64-bit int
-}
-
 /// a name in the link itself, for a share that is only a link: `/maps/place/<name>/`, geo:'s
 /// (label), or a query that is not coordinates
 String nameInLink(String url) {
@@ -202,16 +176,15 @@ class SharedResolution {
 /// a name lookup ignores places farther than this from the truck
 const sharedMatchRadiusMetres = 300000.0;
 
-/// Google answers a plain request with a page that carries no location; as a desktop browser
-/// it gets the full page (Gerry's share, 2026-11-06). MapTiler requests keep OPRivView's own
+/// for following Google's redirects, as a desktop browser; MapTiler requests keep OPRivView's own
 const googleHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
   'Accept-Language': 'en',
 };
 
 /// the place in a share: from the link's coordinates (following a short link to Google's full
-/// one and reading its page, then Google's place id page), else looked up by name near [lat],
-/// [lon] with MapTiler. Throws a StateError saying why not
+/// one), else looked up by name near [lat], [lon] with MapTiler, as matches to pick. Throws a
+/// StateError saying why not
 Future<SharedResolution> resolveSharedPlace(
   String text, {
   required http.Client client,
@@ -225,17 +198,11 @@ Future<SharedResolution> resolveSharedPlace(
   var address = shared.address;
   (double, double)? at = url == null ? null : coordinatesIn(url);
   var linkName = url == null ? '' : nameInLink(url);
-  var cid = url == null ? null : placeCid(_decoded(url));
 
   if (at == null && url != null && url.toLowerCase().startsWith('http')) {
     final followed = await _follow(client, Uri.parse(url));
     at = followed.at;
     if (linkName.isEmpty) linkName = followed.name;
-    cid ??= followed.cid;
-    // Google's page for its id of the place, when the link's own page had no location
-    if (at == null && cid != null) {
-      at = (await _follow(client, Uri.parse('https://maps.google.com/maps?cid=$cid&hl=en'))).at;
-    }
   }
   if (name.isEmpty && linkName.isNotEmpty) {
     final comma = linkName.indexOf(',');
@@ -270,12 +237,12 @@ Uri _english(Uri u) {
   return u.replace(queryParameters: {...u.queryParametersAll, 'hl': ['en']});
 }
 
-/// follows a short link's redirects (and Google's cookie-consent page) to a link or page with
-/// coordinates; also any place name and Google place id met on the way
-Future<({(double, double)? at, String name, String? cid})> _follow(http.Client client, Uri start) async {
+/// follows a short link's redirects (and Google's cookie-consent page) to a link with
+/// coordinates; also any place name met on the way. The page at the end is not read: its map is
+/// centred on the viewer, not the place
+Future<({(double, double)? at, String name})> _follow(http.Client client, Uri start) async {
   var uri = start;
   var name = '';
-  String? cid;
   try {
     for (var hop = 0; hop < 8; hop++) {
       uri = _english(uri);
@@ -292,26 +259,24 @@ Future<({(double, double)? at, String name, String? cid})> _follow(http.Client c
         if (uri.host.startsWith('consent.') && cont != null) uri = Uri.parse(cont);
         final s = uri.toString();
         if (name.isEmpty) name = nameInLink(s);
-        cid ??= placeCid(_decoded(s));
         final at = coordinatesIn(s);
-        if (at != null) return (at: at, name: name, cid: cid);
+        if (at != null) return (at: at, name: name);
         continue;
       }
-      // the end of the redirects: the page may carry them (the map's view, its preview image)
-      final body = r.statusCode == 200 ? await r.stream.bytesToString() : '';
-      if (r.statusCode != 200) await r.stream.drain<void>();
+      // the end of the redirects
+      await r.stream.drain<void>();
       final cont = uri.queryParameters['continue'];
       if (uri.host.startsWith('consent.') && cont != null) {
         uri = Uri.parse(cont);
         final at = coordinatesIn(cont);
-        if (at != null) return (at: at, name: name.isEmpty ? nameInLink(cont) : name, cid: cid);
+        if (at != null) return (at: at, name: name.isEmpty ? nameInLink(cont) : name);
         continue;
       }
-      return (at: body.isEmpty ? null : coordinatesInPage(body), name: name, cid: cid);
+      return (at: null, name: name);
     }
   } catch (e) {
     if (e is StateError) rethrow;
     throw StateError('Could not reach Google Maps: is the head unit online?');
   }
-  return (at: null, name: name, cid: cid);
+  return (at: null, name: name);
 }
