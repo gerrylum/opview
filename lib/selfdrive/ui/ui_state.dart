@@ -716,9 +716,12 @@ class UIState extends ChangeNotifier {
 
   /// steering effort for the Enhanced layout's torque bar, -1..1 (mici torque_bar.py).
   /// angle and curvature control have no torque, so the device estimates it from
-  /// lateral acceleration; it also removes road roll, which opview is not sent
+  /// lateral acceleration; it also removes road roll, which opview is not sent.
+  /// An angle-capable Rivian runs the torque controller but steers on its angle channel
+  /// whenever the driver's hands are off, and then sends no torque (ext_controller.py: the
+  /// output is 0 outside cooperative torque mode), so that is estimated the same way
   double get torqueBarValue {
-    if (lateralControlKind == 'angleState' || lateralControlKind == 'curvatureState') {
+    if (lateralControlKind == 'angleState' || lateralControlKind == 'curvatureState' || lateralMode == LateralMode.angle) {
       if (!latActive) return 0.0;
       final desiredLateralAccel = desiredCurvature * vEgo * vEgo;
       return (desiredLateralAccel / defaultMaxLatAccel).clamp(-1.0, 1.0).toDouble();
