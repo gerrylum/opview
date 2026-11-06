@@ -139,7 +139,7 @@ String _decoded(String s) {
   return null;
 }
 
-/// a name in the link itself, for a share that is only a link: /maps/place/<name>/, geo:'s
+/// a name in the link itself, for a share that is only a link: `/maps/place/<name>/`, geo:'s
 /// (label), or a query that is not coordinates
 String nameInLink(String url) {
   final text = _decoded(url);
