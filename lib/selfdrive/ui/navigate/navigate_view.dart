@@ -153,7 +153,7 @@ class _NavigateViewState extends State<NavigateView> {
     });
   }
 
-  Future<Place> _resolve(String text) {
+  Future<SharedResolution> _resolve(String text) {
     final r = widget.resolveShared;
     if (r != null) return r(text);
     // near the truck: its fix, or the last place it had one
