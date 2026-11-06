@@ -40,8 +40,8 @@ const _red = Color(0xFFFF5A5A);
 const _grey = Color(0xFFBFBFBF);
 const _dim = Color(0xFF8A8A8A);
 
-/// the steering angle scale runs this far each way
-const detailsAngleRange = 45.0;
+/// the steering angle scale runs this far each way: a full turn (Gerry 2026-11-06)
+const detailsAngleRange = 360.0;
 
 /// the following gap bar: red under, orange to, green from
 const detailsGapTooClose = 0.8;  // s
@@ -146,22 +146,24 @@ class _Cards extends StatelessWidget {
           SizedBox(width: 26 * u),
           Expanded(child: _kv('Lat accel', on ? formatAccelPair(st.latAccelWant, st.latAccelGot) : detailedNoValue)),
         ]),
-        const Spacer(),
-        _legend('STEERING ANGLE', [('▼ target', Colors.white), ('▮ actual', _blue)]),
-        SizedBox(height: 4 * u),
-        SizedBox(
-          height: 60 * u,
-          child: CustomPaint(
-            key: const ValueKey('detailsAngleScale'),
-            painter: SteeringAngleScalePainter(
-              target: on ? st.targetSteeringAngleDeg : null,
-              actual: st.steeringAngleDeg,
-              unit: u,
-            ),
-          ),
-        ),
       ],
     );
+    // across the whole card, under the figures and the graph
+    final scale = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      _legend('STEERING ANGLE', [('▼ target', Colors.white), ('▮ actual', _blue)]),
+      SizedBox(height: 4 * u),
+      SizedBox(
+        height: 60 * u,
+        child: CustomPaint(
+          key: const ValueKey('detailsAngleScale'),
+          painter: SteeringAngleScalePainter(
+            target: on ? st.targetSteeringAngleDeg : null,
+            actual: st.steeringAngleDeg,
+            unit: u,
+          ),
+        ),
+      ),
+    ]);
     final right = _trace('LAT ACCEL · 10 s', st.latAccelWantHistory, st.latAccelGotHistory, lo: -2, hi: 2);
     return _card(
       'STEERING',
@@ -172,10 +174,16 @@ class _Cards extends StatelessWidget {
               ? _chip('SATURATED', _orange, key: const ValueKey('detailsSaturated'))
               : _chip('NOT SATURATED', _green),
       ],
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [Expanded(child: left), SizedBox(width: 28 * u), Expanded(child: right)],
-      ),
+      Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [Expanded(child: left), SizedBox(width: 28 * u), Expanded(child: right)],
+          ),
+        ),
+        SizedBox(height: 10 * u),
+        scale,
+      ]),
     );
   }
 
@@ -499,6 +507,7 @@ class _Cards extends StatelessWidget {
   /// the last 10 seconds of what openpilot wanted (white, dashed) against what happened (blue)
   Widget _trace(String title, List<double> want, List<double> got, {required double lo, required double hi}) {
     return Column(
+      key: ValueKey('detailsTrace_$title'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _legend(title, [('– – want', Colors.white), ('— actual', _blue)]),
@@ -544,8 +553,9 @@ String _accel(double v) {
   return i < 0 ? (s, '') : (s.substring(0, i), s.substring(i + 1));
 }
 
-/// a ruler from -45° to +45°: a triangle above it where openpilot wants the wheel, and a
-/// blue bar from the centre to where the wheel is
+/// a ruler from a full turn left to a full turn right, squeezed so the few degrees of normal
+/// driving still show: a triangle above it where openpilot wants the wheel, and a bar from the
+/// centre to where the wheel is
 class SteeringAngleScalePainter extends CustomPainter {
   final double? target;  // null: openpilot is not steering
   final double actual;
@@ -553,28 +563,56 @@ class SteeringAngleScalePainter extends CustomPainter {
 
   const SteeringAngleScalePainter({required this.target, required this.actual, required this.unit});
 
+  /// the scale's shape: -1..1 for [deg], square-root spaced (±15° is about a fifth of the way out,
+  /// ±90° half way, a full turn at the ends)
+  static double squeeze(double deg) {
+    final a = deg.abs().clamp(0.0, detailsAngleRange).toDouble();
+    final s = sqrt(a / detailsAngleRange);
+    return deg < 0 ? -s : s;
+  }
+
   /// where [deg] falls across a scale [width] wide
-  static double xFor(double deg, double width) =>
-      (deg.clamp(-detailsAngleRange, detailsAngleRange) + detailsAngleRange) / (2 * detailsAngleRange) * width;
+  static double xFor(double deg, double width) => (squeeze(deg) + 1) / 2 * width;
+
+  /// the labelled ticks, and the small ones between
+  static const majorTicks = [0, 15, 45, 90, 180, 270, 360];
+  static const minorTicks = [5, 10, 20, 30, 60, 120, 150, 210, 240, 300, 330];
+  static const labelled = [0, 15, 45, 90, 180, 360];
 
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
-    for (var a = -45; a <= 45; a += 5) {
-      final major = a % 15 == 0;
+    // where most driving happens, ±45°
+    canvas.drawRRect(
+      RRect.fromLTRBR(xFor(-45, w), 10 * unit, xFor(45, w), 38 * unit, Radius.circular(6 * unit)),
+      Paint()..color = Colors.white.withValues(alpha: 0.04),
+    );
+    void tick(double a, bool major) {
+      final x = xFor(a, w);
       canvas.drawLine(
-        Offset(xFor(a.toDouble(), w), (major ? 16 : 22) * unit),
-        Offset(xFor(a.toDouble(), w), 34 * unit),
+        Offset(x, (major ? 14 : 22) * unit),
+        Offset(x, 36 * unit),
         Paint()
-          ..color = Colors.white.withValues(alpha: major ? 0.5 : 0.2)
+          ..color = Colors.white.withValues(alpha: major ? 0.55 : 0.2)
           ..strokeWidth = 2 * unit,
       );
-      if (major) {
+    }
+
+    for (final a in minorTicks) {
+      tick(-a.toDouble(), false);
+      tick(a.toDouble(), false);
+    }
+    for (final a in majorTicks) {
+      tick(-a.toDouble(), true);
+      if (a != 0) tick(a.toDouble(), true);
+    }
+    for (final a in labelled) {
+      for (final v in a == 0 ? [0] : [-a, a]) {
         final tp = TextPainter(
-          text: TextSpan(text: '$a°', style: TextStyle(color: _labelColor, fontSize: 14 * unit)),
+          text: TextSpan(text: '${v > 0 ? '+' : ''}$v°', style: TextStyle(color: _labelColor, fontSize: 14 * unit)),
           textDirection: TextDirection.ltr,
         )..layout();
-        var x = xFor(a.toDouble(), w) - tp.width / 2;
+        var x = xFor(v.toDouble(), w) - tp.width / 2;
         x = x.clamp(0.0, max(0.0, w - tp.width)).toDouble();
         tp.paint(canvas, Offset(x, 40 * unit));
       }

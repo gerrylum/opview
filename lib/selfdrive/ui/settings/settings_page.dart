@@ -15,11 +15,13 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:opview/selfdrive/ui/navigate/navigate_view.dart' show askPlaceName;
 import 'package:opview/selfdrive/ui/shell/menu_rail.dart' show formatRecordingTime;
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
 import 'package:opview/services/nav/maptiler.dart';
 import 'package:opview/services/nav/places.dart';
+import 'package:opview/services/nav/shared_place.dart';
 import 'package:opview/services/recorder/clip_store.dart';
 import 'package:opview/services/recorder/recorder.dart';
 import 'package:opview/services/updater.dart';
@@ -78,6 +80,10 @@ class SettingsPage extends StatefulWidget {
   /// request to MapTiler unless replaced, in tests)
   final Future<String?> Function(String key)? checkMapKey;
 
+  /// finds places for "Add place…" (an address, a name, or a Google Maps link); MapTiler and
+  /// Google unless replaced, in tests
+  final Future<List<Place>> Function(String query)? findPlaces;
+
   /// this build's name, under the categories
   final String? build;
 
@@ -96,6 +102,7 @@ class SettingsPage extends StatefulWidget {
     this.onChangeHost,
     this.onReconnect,
     this.checkMapKey,
+    this.findPlaces,
     this.build,
     this.initial = SettingsCategory.drivingView,
   });
@@ -456,7 +463,18 @@ class _SettingsPageState extends State<SettingsPage> {
       _cardBox('SAVED PLACES', [
         _placeRow('Home', s.navHome, () => s.setNavHome(null), 'clearHome'),
         _placeRow('Work', s.navWork, () => s.setNavWork(null), 'clearWork'),
-      ], sub: 'Save them from a destination\'s card in Navigate'),
+        for (final (i, p) in s.navSaved.indexed)
+          _row(
+            p.name,
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              _button('Rename', () => _renameSaved(i), key: 'savedRename_$i'),
+              SizedBox(width: 10 * u),
+              _button('Delete', () => s.removeNavSaved(i), key: 'savedDelete_$i'),
+            ]),
+            sub: p.address.isEmpty ? null : p.address,
+          ),
+        _row('Add a place by its address', _button('Add place…', _addSaved, primary: true, key: 'savedAdd')),
+      ], sub: 'Or save one from a destination\'s card in Navigate. Saved places are one tap away there'),
       _cardBox('RECENT PLACES', [
         if (s.navRecents.isEmpty) Text('None yet', style: TextStyle(color: _label, fontSize: 21 * u)),
         for (final p in s.navRecents) _row(p.name, const SizedBox.shrink(), sub: p.address),
@@ -547,6 +565,137 @@ class _SettingsPageState extends State<SettingsPage> {
     );
     client?.close();
     // the controller is left to go with the dialog: it is still drawn while the dialog fades out
+  }
+
+  Future<void> _renameSaved(int i) async {
+    final name = await askPlaceName(context, title: 'Rename', initial: s.navSaved[i].name);
+    if (name != null) await s.renameNavSaved(i, name);
+  }
+
+  /// places for "Add place…": a Google Maps link's place, or MapTiler's matches near the truck
+  Future<List<Place>> _find(String query) async {
+    final f = widget.findPlaces;
+    if (f != null) return f(query);
+    final known = st.gpsFix || st.gpsLat != 0 || st.gpsLon != 0;
+    final lat = known ? st.gpsLat : null, lon = known ? st.gpsLon : null;
+    final client = http.Client();
+    try {
+      if (looksLikeMapsLink(query)) {
+        final r = await resolveSharedPlace(query, client: client, mapKey: s.mapTilerKey, lat: lat, lon: lon);
+        return r.place != null ? [r.place!] : r.matches;
+      }
+      final key = s.mapTilerKey;
+      if (key == null) throw StateError('Add a MapTiler key above first, or paste a Google Maps link');
+      return await searchPlaces(client, key, query, lat: lat, lon: lon);
+    } finally {
+      client.close();
+    }
+  }
+
+  /// find a place by its address (or a Maps link), pick it, name it, save it
+  Future<void> _addSaved() async {
+    final query = TextEditingController();
+    final name = TextEditingController();
+    List<Place> found = const [];
+    Place? picked;
+    String? error;
+    var finding = false;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(builder: (context, setDialog) {
+        Future<void> find() async {
+          final q = query.text.trim();
+          if (q.isEmpty) return;
+          setDialog(() {
+            finding = true;
+            error = null;
+            picked = null;
+          });
+          try {
+            final r = await _find(q);
+            setDialog(() {
+              found = r;
+              finding = false;
+              error = r.isEmpty ? 'Nothing found' : null;
+            });
+          } catch (e) {
+            setDialog(() {
+              found = const [];
+              finding = false;
+              error = e is StateError ? e.message : 'Search failed: no internet on the head unit?';
+            });
+          }
+        }
+
+        return AlertDialog(
+          key: const ValueKey('savedAddDialog'),
+          backgroundColor: const Color(0xFF16171A),
+          title: const Text('Add a saved place'),
+          content: SizedBox(
+            width: 680,
+            child: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Row(children: [
+                  Expanded(
+                    child: TextField(
+                      key: const ValueKey('savedAddQuery'),
+                      controller: query,
+                      autofocus: true,
+                      textInputAction: TextInputAction.search,
+                      onSubmitted: (_) => find(),
+                      decoration: const InputDecoration(hintText: 'Address, place, or a Google Maps link'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  TextButton(key: const ValueKey('savedAddFind'), onPressed: finding ? null : find, child: const Text('Find')),
+                ]),
+                if (finding) ...[const SizedBox(height: 12), const Text('Finding…', style: TextStyle(color: _label))],
+                if (error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(error!, key: const ValueKey('savedAddError'), style: const TextStyle(color: Color(0xFFFF6B6B))),
+                ],
+                for (final (i, p) in found.indexed)
+                  ListTile(
+                    key: ValueKey('savedAddResult_$i'),
+                    selected: identical(p, picked),
+                    selectedTileColor: const Color(0xFF24272B),
+                    leading: Icon(identical(p, picked) ? Icons.radio_button_checked : Icons.radio_button_off),
+                    title: Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    subtitle: p.address.isEmpty ? null : Text(p.address, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    onTap: () => setDialog(() {
+                      picked = p;
+                      name.text = p.name;
+                    }),
+                  ),
+                if (picked != null) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const ValueKey('savedAddName'),
+                    controller: name,
+                    onChanged: (_) => setDialog(() {}),
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(labelText: 'Save it as'),
+                  ),
+                ],
+              ]),
+            ),
+          ),
+          actions: [
+            TextButton(key: const ValueKey('savedAddCancel'), onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('Cancel')),
+            FilledButton(
+              key: const ValueKey('savedAddSave'),
+              onPressed: picked == null || name.text.trim().isEmpty
+                  ? null
+                  : () {
+                      s.saveNavPlace(picked!.named(name.text.trim()));
+                      Navigator.of(dialogContext).pop();
+                    },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      }),
+    );
   }
 
   Widget _placeRow(String label, Place? p, VoidCallback clear, String key) =>

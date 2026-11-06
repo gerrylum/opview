@@ -7,6 +7,7 @@ import 'package:opview/selfdrive/ui/settings/settings_page.dart';
 import 'package:opview/selfdrive/ui/shell/app_shell.dart' show shellUnit;
 import 'package:opview/selfdrive/ui/ui_state.dart';
 import 'package:opview/services/app_settings.dart';
+import 'package:opview/services/nav/places.dart';
 import 'package:opview/services/recorder/recorder.dart';
 import 'package:opview/services/updater.dart';
 
@@ -25,6 +26,7 @@ Future<void> showSettingsDialog(
   Recorder? recorder,
   SettingsCategory initial = SettingsCategory.drivingView,
   Future<String?> Function(String key)? checkMapKey,
+  Future<List<Place>> Function(String query)? findPlaces,
 }) {
   final state = uiState ?? UIState();
   return showDialog<void>(
@@ -51,6 +53,7 @@ Future<void> showSettingsDialog(
                   },
             onReconnect: onReconnect,
             checkMapKey: checkMapKey,
+            findPlaces: findPlaces,
             build: build,
             initial: initial,
             onDone: () => Navigator.of(dialogContext).pop(),

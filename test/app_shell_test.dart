@@ -202,7 +202,7 @@ void main() {
             sent.add(d);
             return true;
           },
-          resolveShared: (text) async => const Place(name: 'Shared Cafe', address: '1 Main St', lat: 49.28, lon: -123.12),
+          resolveShared: (text) async => const SharedResolution.exact(Place(name: 'Shared Cafe', address: '1 Main St', lat: 49.28, lon: -123.12)),
         ),
       ));
       expect(find.byKey(const ValueKey('navigateView')), findsNothing);
@@ -231,7 +231,7 @@ void main() {
             sent.add(d);
             return true;
           },
-          resolveShared: (text) async => const Place(name: 'Shared Cafe', address: '', lat: 49.28, lon: -123.12),
+          resolveShared: (text) async => const SharedResolution.exact(Place(name: 'Shared Cafe', address: '', lat: 49.28, lon: -123.12)),
         ),
       ));
       await tester.pump();

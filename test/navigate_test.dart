@@ -17,6 +17,7 @@ import 'package:opview/services/app_settings.dart';
 import 'package:opview/services/impl/cereal_adapter.dart';
 import 'package:opview/services/nav/maptiler.dart';
 import 'package:opview/services/nav/places.dart';
+import 'package:opview/services/nav/shared_place.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'golden/mock_ui_state.dart';
 
@@ -288,7 +289,13 @@ void main() {
             resolveShared: resolve ??
                 (text) async {
                   if (text.contains('broken')) throw StateError('That link has no location in it');
-                  return const Place(name: 'Shared Cafe', address: '1 Main St', lat: 49.28, lon: -123.12);
+                  if (text.contains('nameonly')) {
+                    return const SharedResolution.matches([
+                      Place(name: 'Post Office', address: 'Aubrey, TX', lat: 33.2332, lon: -96.9736),
+                      Place(name: 'Post Office', address: 'Pilot Point, TX', lat: 33.396, lon: -96.960),
+                    ], 'United States Postal Service');
+                  }
+                  return const SharedResolution.exact(Place(name: 'Shared Cafe', address: '1 Main St', lat: 49.28, lon: -123.12));
                 },
             search: searchable ? ((q, lat, lon) async => q.toLowerCase().startsWith('cost') ? [_costco, _gas] : <Place>[]) : null,
           ),
@@ -500,12 +507,12 @@ void main() {
       });
 
       testWidgets('while it is read: a card says so', (tester) async {
-        final done = Completer<Place>();
+        final done = Completer<SharedResolution>();
         await show(tester, createMockUIState(), shared: 'https://maps.app.goo.gl/x', sharedId: 1, resolve: (_) => done.future);
         await tester.pump();
         expect(find.byKey(const ValueKey('navShareCard')), findsOneWidget);
         expect(find.text('Opening the place from Google Maps…'), findsOneWidget);
-        done.complete(const Place(name: 'Shared Cafe', address: '', lat: 49.28, lon: -123.12));
+        done.complete(const SharedResolution.exact(Place(name: 'Shared Cafe', address: '', lat: 49.28, lon: -123.12)));
         await tester.pump();
         await tester.pump();
         expect(find.byKey(const ValueKey('navRouteCard')), findsOneWidget);
@@ -521,6 +528,48 @@ void main() {
         await tester.tap(find.byKey(const ValueKey('navShareOk')));
         await tester.pump();
         expect(find.byKey(const ValueKey('navSearchPanel')), findsOneWidget);
+      });
+
+      testWidgets('Google gave no location: the name matches are shown to pick, nothing is sent', (tester) async {
+        await show(tester, createMockUIState(), shared: 'nameonly https://maps.app.goo.gl/x', sharedId: 1);
+        await tester.pump();
+        await tester.pump();
+        expect(sent, isEmpty);
+        expect(find.byKey(const ValueKey('navShareMatches')), findsOneWidget);
+        expect(find.text('Aubrey, TX'), findsOneWidget);
+        expect(find.text('Pilot Point, TX'), findsOneWidget);
+        expect(find.text('United States Postal Service'), findsOneWidget);  // what was looked up, in the box
+        await tester.tap(find.byKey(const ValueKey('navResult_Post Office')).first);
+        await tester.pump();
+        expect(sent, [(33.2332, -96.9736)]);
+      });
+
+      testWidgets('one that cannot be read shows what Google Maps shared', (tester) async {
+        await show(tester, createMockUIState(), shared: 'broken https://maps.app.goo.gl/x', sharedId: 1);
+        await tester.pump();
+        await tester.pump();
+        expect(find.byKey(const ValueKey('navShareText')), findsOneWidget);
+        expect(find.text('broken https://maps.app.goo.gl/x'), findsOneWidget);
+      });
+
+      testWidgets('saved places: Save place names it, and it is a chip from then on', (tester) async {
+        await show(tester, createMockUIState(), shared: 'https://maps.app.goo.gl/x', sharedId: 1);
+        await tester.pump();
+        await tester.pump();
+        await tester.tap(find.byKey(const ValueKey('navSavePlace')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('placeNameDialog')), findsOneWidget);
+        await tester.enterText(find.byKey(const ValueKey('placeNameField')), 'Coffee');
+        await tester.tap(find.byKey(const ValueKey('placeNameSave')));
+        await tester.pumpAndSettle();
+        expect(settings.navSaved.single.name, 'Coffee');
+        expect(settings.navSaved.single.lat, 49.28);
+        expect(find.text('Saved ✓'), findsOneWidget);
+        // back to the search: Coffee is a chip, and not repeated as a recent
+        await tester.tap(find.byKey(const ValueKey('navCancel')));
+        await tester.pump();
+        expect(find.byKey(const ValueKey('navChip_Coffee')), findsOneWidget);
+        expect(find.byKey(const ValueKey('navChip_Shared Cafe')), findsNothing);
       });
 
       testWidgets('works without a MapTiler key', (tester) async {

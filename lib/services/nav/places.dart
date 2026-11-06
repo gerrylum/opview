@@ -10,6 +10,9 @@ class Place {
 
   const Place({required this.name, required this.address, required this.lat, required this.lon});
 
+  /// the same place under another name
+  Place named(String newName) => Place(name: newName, address: address, lat: lat, lon: lon);
+
   Map<String, dynamic> toJson() => {'name': name, 'address': address, 'lat': lat, 'lon': lon};
 
   static Place? fromJson(Object? j) {

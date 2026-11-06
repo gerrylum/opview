@@ -31,8 +31,9 @@ typedef PlaceSearch = Future<List<Place>> Function(String query, double? lat, do
 /// sends a destination to the comma (null clears it); false when not connected
 typedef SendDestination = Future<bool> Function((double, double)? destination);
 
-/// finds the place in a share or a pasted Google Maps link; throws a StateError saying why not
-typedef SharedPlaceResolver = Future<Place> Function(String text);
+/// finds the place in a share or a pasted Google Maps link (exact, or matches to choose from);
+/// throws a StateError saying why not
+typedef SharedPlaceResolver = Future<SharedResolution> Function(String text);
 
 /// how long the card waits for navd before saying why there may be no route
 const navPlanningPatience = Duration(seconds: 20);
@@ -114,6 +115,12 @@ class _NavigateViewState extends State<NavigateView> {
   bool _opening = false;
   String? _shareError;
 
+  /// the shared text, shown when it could not be opened
+  String? _sharedText;
+
+  /// Google gave no location: these results are name matches, for the driver to pick
+  String? _matchesFor;
+
   /// picked while not connected: goes to the comma once it connects
   Place? _waitingToSend;
 
@@ -149,29 +156,46 @@ class _NavigateViewState extends State<NavigateView> {
   Future<Place> _resolve(String text) {
     final r = widget.resolveShared;
     if (r != null) return r(text);
+    // near the truck: its fix, or the last place it had one
+    final known = st.gpsFix || st.gpsLat != 0 || st.gpsLon != 0;
     return resolveSharedPlace(
       text,
       client: _client ??= http.Client(),
       mapKey: _key,
-      lat: st.gpsFix ? st.gpsLat : null,
-      lon: st.gpsFix ? st.gpsLon : null,
+      lat: known ? st.gpsLat : null,
+      lon: known ? st.gpsLon : null,
     );
   }
 
-  /// opens the shared place: picked, so it goes to the comma, as a search result would
+  /// opens the shared place: where Google puts it is picked, so it goes to the comma, as a search
+  /// result would. Places only found by name are shown as results to pick from instead
   Future<void> _takeShare(String text) async {
     _focus.unfocus();
     setState(() {
       _opening = true;
       _shareError = null;
+      _sharedText = text;
+      _matchesFor = null;
       _picked = null;
       _newSearch = st.navDestination != null;
     });
     try {
-      final p = await _resolve(text);
+      final r = await _resolve(text);
       if (!mounted) return;
-      setState(() => _opening = false);
-      await _pick(p);
+      final exact = r.place;
+      if (exact != null) {
+        setState(() => _opening = false);
+        await _pick(exact);
+        return;
+      }
+      _field.text = r.lookedUp;
+      setState(() {
+        _opening = false;
+        _results = r.matches;
+        _searching = false;
+        _searchError = null;
+        _matchesFor = r.lookedUp;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -218,6 +242,7 @@ class _NavigateViewState extends State<NavigateView> {
   void _onQuery(String text) {
     _debounce?.cancel();
     final q = text.trim();
+    _matchesFor = null;
     // a Google Maps link pasted in: its place as the one result
     if (looksLikeMapsLink(q)) {
       setState(() {
@@ -225,10 +250,11 @@ class _NavigateViewState extends State<NavigateView> {
         _searchError = null;
       });
       final id = ++_query;
-      _resolve(q).then((p) {
+      _resolve(q).then((r) {
         if (!mounted || id != _query) return;
         setState(() {
-          _results = [p];
+          _results = r.place != null ? [r.place!] : r.matches;
+          _matchesFor = r.place != null ? null : r.lookedUp;
           _searching = false;
         });
       }, onError: (Object e) {
@@ -380,6 +406,16 @@ class _NavigateViewState extends State<NavigateView> {
         if (error != null) ...[
           SizedBox(height: 12 * u),
           Text(error, key: const ValueKey('navShareError'), style: TextStyle(color: const Color(0xFFFF6B6B), fontSize: 22 * u, height: 1.3)),
+          if (_sharedText != null) ...[
+            SizedBox(height: 12 * u),
+            Text('Google Maps shared:', style: TextStyle(color: _grey, fontSize: 18 * u)),
+            SizedBox(height: 4 * u),
+            Text(_sharedText!,
+                key: const ValueKey('navShareText'),
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: const Color(0xFFBFBFBF), fontSize: 18 * u, fontFamily: 'monospace')),
+          ],
           SizedBox(height: 18 * u),
           _bigButton('OK', () => setState(() {
                 _shareError = null;
@@ -434,7 +470,12 @@ class _NavigateViewState extends State<NavigateView> {
     return [
       if (s.navHome != null) (Icons.home_outlined, s.navHome!),
       if (s.navWork != null) (Icons.work_outline, s.navWork!),
-      for (final r in s.navRecents.take(4)) (Icons.history, r),
+      for (final p in s.navSaved) (Icons.bookmark_outline, p),
+      // recent places not already above
+      for (final r in s.navRecents
+          .where((r) => ![s.navHome, s.navWork, ...s.navSaved].any((k) => k != null && k.sameSpot(r)))
+          .take(4))
+        (Icons.history, r),
     ];
   }
 
@@ -505,8 +546,18 @@ class _NavigateViewState extends State<NavigateView> {
     );
   }
 
-  Widget get _resultsLabel =>
-      Text('RESULTS', style: TextStyle(color: _grey, fontSize: 19 * u, fontWeight: FontWeight.w700, letterSpacing: 1 * u));
+  Widget get _resultsLabel {
+    final label = Text('RESULTS', style: TextStyle(color: _grey, fontSize: 19 * u, fontWeight: FontWeight.w700, letterSpacing: 1 * u));
+    if (_matchesFor == null) return label;
+    // a share Google gave no location for: these are only name matches near the truck
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+      Text('Google Maps did not say where this is: tap the right one',
+          key: const ValueKey('navShareMatches'),
+          style: TextStyle(color: const Color(0xFFFFB020), fontSize: 21 * u, fontWeight: FontWeight.w600)),
+      SizedBox(height: 8 * u),
+      label,
+    ]);
+  }
 
   /// the results: a list in the side panel, a grid [columns] across while typing
   Widget _resultsBody({int columns = 1}) {
@@ -694,10 +745,20 @@ class _NavigateViewState extends State<NavigateView> {
         Wrap(spacing: 10 * u, runSpacing: 10 * u, children: [
           _button('Save as Home', () => widget.settings.setNavHome(p), key: 'navSaveHome'),
           _button('Save as Work', () => widget.settings.setNavWork(p), key: 'navSaveWork'),
+          _button(widget.settings.navSaved.any((k) => k.sameSpot(p)) ? 'Saved ✓' : 'Save place…', () => _savePlace(p), key: 'navSavePlace'),
           if (!justPicked) _button('New destination', () => setState(() => _newSearch = true), key: 'navNewSearch'),
         ]),
       ]),
     );
+  }
+
+  /// asks for a name and keeps [p] in the saved places (saving it again renames it)
+  Future<void> _savePlace(Place p) async {
+    final saved = widget.settings.navSaved.where((k) => k.sameSpot(p)).firstOrNull;
+    final name = await askPlaceName(context, title: 'Save place', initial: saved?.name ?? p.name);
+    if (name == null || !mounted) return;
+    await widget.settings.saveNavPlace(p.named(name));
+    if (mounted) setState(() {});  // "Saved ✓"
   }
 
   Widget _figure(String label, String value) => Flexible(
@@ -768,4 +829,34 @@ class _NavigateViewState extends State<NavigateView> {
       ),
     );
   }
+}
+
+/// asks for a place's name; null for Cancel. Used to save a place and to rename one
+Future<String?> askPlaceName(BuildContext context, {required String title, required String initial}) async {
+  final field = TextEditingController(text: initial);
+  final name = await showDialog<String>(
+    context: context,
+    builder: (context) => AlertDialog(
+      key: const ValueKey('placeNameDialog'),
+      backgroundColor: const Color(0xFF16171A),
+      title: Text(title),
+      content: SizedBox(
+        width: 560,
+        child: TextField(
+          key: const ValueKey('placeNameField'),
+          controller: field,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(hintText: 'Name, e.g. Gym or Mum\'s'),
+          onSubmitted: (v) => Navigator.of(context).pop(v),
+        ),
+      ),
+      actions: [
+        TextButton(key: const ValueKey('placeNameCancel'), onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        FilledButton(key: const ValueKey('placeNameSave'), onPressed: () => Navigator.of(context).pop(field.text), child: const Text('Save')),
+      ],
+    ),
+  );
+  final n = name?.trim();
+  return n == null || n.isEmpty ? null : n;
 }

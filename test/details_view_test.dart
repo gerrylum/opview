@@ -36,12 +36,31 @@ const _cards = ['STEERING', 'LONGITUDINAL', 'LEAD', 'DRIVER & ROAD'];
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test('the angle scale runs -45° to +45° and stops at the ends', () {
+  test('the angle scale runs a full turn each way, squeezed so small angles still show', () {
     expect(SteeringAngleScalePainter.xFor(0, 400), 200);
-    expect(SteeringAngleScalePainter.xFor(-45, 400), 0);
-    expect(SteeringAngleScalePainter.xFor(45, 400), 400);
-    expect(SteeringAngleScalePainter.xFor(90, 400), 400);
-    expect(SteeringAngleScalePainter.xFor(-22.5, 400), 100);
+    expect(SteeringAngleScalePainter.xFor(-360, 400), 0);
+    expect(SteeringAngleScalePainter.xFor(360, 400), 400);
+    expect(SteeringAngleScalePainter.xFor(500, 400), 400);  // stops at the ends
+    expect(SteeringAngleScalePainter.xFor(90, 400), 300);   // half way out
+    expect(SteeringAngleScalePainter.xFor(-90, 400), 100);
+    // square-root spaced: ±15° about a fifth of the way out
+    expect(SteeringAngleScalePainter.squeeze(15), closeTo(0.204, 0.001));
+    expect(SteeringAngleScalePainter.squeeze(-45), closeTo(-0.354, 0.001));
+    expect(SteeringAngleScalePainter.squeeze(5), closeTo(0.118, 0.001));  // a straight scale: 0.014
+  });
+
+  testWidgets('the angle scale runs across the whole steering card, under the graph', (tester) async {
+    tester.view.physicalSize = const Size(1920, 1000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(_details(createMockUIState()));
+    await tester.pump();
+    final scale = tester.getRect(find.byKey(const ValueKey('detailsAngleScale')));
+    final graph = tester.getRect(find.byKey(const ValueKey('detailsTrace_LAT ACCEL · 10 s')));
+    expect(scale.right, closeTo(graph.right, 1));
+    expect(scale.top, greaterThan(graph.bottom));
+    expect(tester.takeException(), isNull);
   });
 
   test('the gap bar runs 0 to 3 s', () {

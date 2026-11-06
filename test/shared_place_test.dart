@@ -76,9 +76,10 @@ void main() {
 
   group('resolving', () {
     /// answers by URL: a redirect, a page, or MapTiler's geocoding
-    http.Client web(Map<String, http.Response Function()> answers, {List<String>? asked}) =>
+    http.Client web(Map<String, http.Response Function()> answers, {List<String>? asked, List<String>? agents}) =>
         MockClient((r) async {
           asked?.add(r.url.toString());
+          agents?.add('${r.url.host} ${r.headers['User-Agent']}');
           for (final e in answers.entries) {
             if (r.url.toString().startsWith(e.key)) return e.value();
           }
@@ -89,10 +90,11 @@ void main() {
 
     test('a short link is followed to the pin; the name comes from the share', () async {
       final asked = <String>[];
-      final p = await resolveSharedPlace(
+      final p = (await resolveSharedPlace(
         'Costco Wholesale\n2655 El Camino Real, Tustin, CA\nhttps://maps.app.goo.gl/AbC123',
         client: web({'https://maps.app.goo.gl/AbC123': () => redirect(_full)}, asked: asked),
-      );
+      ))
+          .place!;
       expect(p.name, 'Costco Wholesale');
       expect(p.address, '2655 El Camino Real, Tustin, CA');
       expect((p.lat, p.lon), (33.7341, -117.8143));
@@ -100,43 +102,132 @@ void main() {
     });
 
     test('a link with the coordinates in it needs no request', () async {
-      final p = await resolveSharedPlace(_full, client: web({}));
+      final p = (await resolveSharedPlace(_full, client: web({}))).place!;
       expect(p.name, 'Costco Wholesale');
       expect((p.lat, p.lon), (33.7341, -117.8143));
     });
 
     test("through Google's cookie consent page", () async {
       final consent = 'https://consent.google.com/ml?continue=${Uri.encodeComponent(_full)}&gl=GB';
-      final p = await resolveSharedPlace('https://maps.app.goo.gl/AbC123',
-          client: web({'https://maps.app.goo.gl/': () => redirect(consent)}));
+      final p = (await resolveSharedPlace('https://maps.app.goo.gl/AbC123',
+              client: web({'https://maps.app.goo.gl/': () => redirect(consent)})))
+          .place!;
       expect((p.lat, p.lon), (33.7341, -117.8143));
       expect(p.name, 'Costco Wholesale');
     });
 
     test('several redirects, then a page with a map image centred on it', () async {
-      final p = await resolveSharedPlace('Some Cafe\nhttps://maps.app.goo.gl/AbC123', client: web({
+      final p = (await resolveSharedPlace('Some Cafe\nhttps://maps.app.goo.gl/AbC123', client: web({
         'https://maps.app.goo.gl/': () => redirect('https://goo.gl/maps/xyz'),
         'https://goo.gl/maps/': () => redirect('https://www.google.com/maps?q=Some+Cafe&ftid=0x1'),
         'https://www.google.com/maps': () =>
             http.Response('<meta content="https://maps.google.com/maps/api/staticmap?center=49.2827%2C-123.1207&amp;zoom=15">', 200),
-      }));
+      })))
+          .place!;
       expect((p.lat, p.lon), (49.2827, -123.1207));
       expect(p.name, 'Some Cafe');
     });
 
-    test('no coordinates anywhere: the address is looked up with MapTiler', () async {
+    test('no coordinates anywhere: the address is looked up with MapTiler, as matches to pick', () async {
       final asked = <String>[];
-      final p = await resolveSharedPlace('Some Cafe\n123 Main St, Vancouver\nhttps://maps.app.goo.gl/AbC123',
+      final r = await resolveSharedPlace('Some Cafe\n123 Main St, Vancouver\nhttps://maps.app.goo.gl/AbC123',
           mapKey: 'abcDEF1234567890',
           client: web({
             'https://maps.app.goo.gl/': () => http.Response('<html>no map here</html>', 200),
             'https://api.maptiler.com/geocoding/': () => http.Response(
                 '{"features":[{"text":"Some Cafe","place_name":"Some Cafe, 123 Main St, Vancouver","center":[-123.1,49.28]}]}', 200),
           }, asked: asked));
+      expect(r.place, isNull);  // a lookup is never sent by itself
+      final p = r.matches.single;
       expect((p.lat, p.lon), (49.28, -123.1));
       expect(p.name, 'Some Cafe');
       expect(p.address, '123 Main St, Vancouver');
+      expect(r.lookedUp, 'Some Cafe, 123 Main St, Vancouver');
       expect(asked.last, contains('Some%20Cafe'));
+    });
+
+    group("Gerry's post office (2026-11-06): a link with only Google's place id", () {
+      const short = 'https://maps.app.goo.gl/WU4joGu8mEP69MQj7?g_st=ac';
+      const place = 'https://www.google.com/maps/place/United+States+Postal+Service/data=!4m2!3m1!1s0x864c4974e2a517b3:0x8f13584efcc38069!18m1!1e1?utm_source=mstt_1&entry=gps&g_st=ac';
+      // as Google answers a desktop browser: the map's starting view and its preview image
+      const page = '<html><head><meta content="https://maps.google.com/maps/api/staticmap?center=33.2332013%2C-96.9736192&amp;zoom=15" itemprop="image">'
+          '<script>window.APP_INITIALIZATION_STATE=[[[13349.083878244373,-96.9736192,33.2332013],[0,0,0],[1024,768],13.1],'
+          '[[["m",[15,7543,13207],13,[543215405]]]]];window.x=".1793995265093219,86414944"</script></head></html>';
+
+      test('the place page, read as a desktop browser, gives the post office near Aubrey', () async {
+        final asked = <String>[];
+        final agents = <String>[];
+        final r = await resolveSharedPlace(short,
+            client: web({
+              short: () => redirect(place),
+              'https://www.google.com/maps/place/United': () => http.Response(page, 200),
+            }, asked: asked, agents: agents));
+        expect(r.place, isNotNull);
+        expect((r.place!.lat, r.place!.lon), (33.2332013, -96.9736192));
+        expect(r.place!.name, 'United States Postal Service');
+        expect(asked.last, contains('hl=en'));
+        expect(agents.every((a) => a.contains('Chrome') && a.contains('Windows')), isTrue);
+      });
+
+      test("no location on that page: Google's place id page (cid) has it", () async {
+        final asked = <String>[];
+        final r = await resolveSharedPlace(short,
+            client: web({
+              short: () => redirect(place),
+              'https://www.google.com/maps/place/United': () => http.Response('<html>loading…</html>', 200),
+              'https://maps.google.com/maps?cid=10309681068252561513': () => http.Response(page, 200),
+            }, asked: asked));
+        expect((r.place!.lat, r.place!.lon), (33.2332013, -96.9736192));
+        expect(asked.last, startsWith('https://maps.google.com/maps?cid=10309681068252561513'));
+      });
+
+      test('no location from Google at all: matches near the truck only, never Alaska', () async {
+        final r = await resolveSharedPlace('United States Post Office\n$short',
+            mapKey: 'abcDEF1234567890',
+            lat: 33.30,
+            lon: -96.98,
+            client: web({
+              short: () => redirect(place),
+              'https://www.google.com/': () => http.Response('<html></html>', 200),
+              'https://maps.google.com/': () => http.Response('<html></html>', 200),
+              'https://api.maptiler.com/geocoding/': () => http.Response(
+                  '{"features":['
+                  '{"text":"United States Post Office","place_name":"United States Post Office, Nome, Alaska","center":[-165.4,64.5]},'
+                  '{"text":"United States Post Office","place_name":"United States Post Office, Aubrey, Texas","center":[-96.9736,33.2332]}]}',
+                  200),
+            }));
+        expect(r.place, isNull);
+        expect(r.matches.single.address, 'Aubrey, Texas');
+        // the fullest text: the place page's name ("Postal Service") is longer than the share's
+        expect(r.lookedUp, 'United States Postal Service');
+      });
+
+      test('nothing near the truck says so', () async {
+        expect(
+          () => resolveSharedPlace('United States Post Office',
+              mapKey: 'abcDEF1234567890',
+              lat: 33.30,
+              lon: -96.98,
+              client: web({
+                'https://api.maptiler.com/geocoding/': () => http.Response(
+                    '{"features":[{"text":"United States Post Office","place_name":"x, Nome, Alaska","center":[-165.4,64.5]}]}', 200),
+              })),
+          throwsA(isA<StateError>().having((e) => e.message, 'message', contains('near the truck'))),
+        );
+      });
+    });
+
+    test('page coordinates: the pin, then the starting view (longitude first), then the preview', () {
+      expect(coordinatesInPage('x!3d33.7341!4d-117.8143 y APP_INITIALIZATION_STATE=[[[1,-96.9,33.2]'), (33.7341, -117.8143));
+      expect(coordinatesInPage('APP_INITIALIZATION_STATE=[[[13349.08,-96.9736192,33.2332013] center=1%2C2'), (33.2332013, -96.9736192));
+      expect(coordinatesInPage('staticmap?center=33.2332013%2C-96.9736192'), (33.2332013, -96.9736192));
+      expect(coordinatesInPage('@.1793995265093219,86414944 and nothing else'), isNull);
+    });
+
+    test("Google's place id from a feature id", () {
+      expect(placeCid('data=!4m2!3m1!1s0x864c4974e2a517b3:0x8f13584efcc38069!18m1'), '10309681068252561513');
+      expect(placeCid('ftid=0x80dc:0x1'), '1');
+      expect(placeCid('no id'), isNull);
     });
 
     test('no coordinates and no MapTiler key says so', () async {

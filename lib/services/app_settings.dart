@@ -77,6 +77,7 @@ const _recordBufferKey = 'record_buffer_s';
 const _navHomeKey = 'nav_home';
 const _navWorkKey = 'nav_work';
 const _navRecentsKey = 'nav_recents';
+const _navSavedKey = 'nav_saved';
 const _storageLimitKey = 'record_storage_gb';
 const _recordExplainedKey = 'record_explained';
 
@@ -139,6 +140,9 @@ class AppSettings extends ChangeNotifier {
   Place? navWork;
   List<Place> navRecents = const [];
 
+  /// places the driver saved under a name of their own, in the order saved
+  List<Place> navSaved = const [];
+
   /// read saved settings; unknown or missing values keep the defaults
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -175,6 +179,7 @@ class AppSettings extends ChangeNotifier {
     navHome = _place(prefs.getString(_navHomeKey));
     navWork = _place(prefs.getString(_navWorkKey));
     navRecents = (prefs.getStringList(_navRecentsKey) ?? const []).map(_place).whereType<Place>().toList();
+    navSaved = (prefs.getStringList(_navSavedKey) ?? const []).map(_place).whereType<Place>().toList();
     notifyListeners();
   }
 
@@ -299,6 +304,35 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_navRecentsKey, [for (final p in navRecents) jsonEncode(p.toJson())]);
+  }
+
+  /// save [place] under its name; saving the same spot again renames it instead of adding a copy
+  Future<void> saveNavPlace(Place place) async {
+    final i = navSaved.indexWhere((p) => p.sameSpot(place));
+    navSaved = [
+      if (i < 0) ...[...navSaved, place] else
+        for (var j = 0; j < navSaved.length; j++) j == i ? place : navSaved[j],
+    ];
+    await _saveSaved();
+  }
+
+  Future<void> renameNavSaved(int index, String name) async {
+    final n = name.trim();
+    if (index < 0 || index >= navSaved.length || n.isEmpty) return;
+    navSaved = [for (var j = 0; j < navSaved.length; j++) j == index ? navSaved[j].named(n) : navSaved[j]];
+    await _saveSaved();
+  }
+
+  Future<void> removeNavSaved(int index) async {
+    if (index < 0 || index >= navSaved.length) return;
+    navSaved = [...navSaved]..removeAt(index);
+    await _saveSaved();
+  }
+
+  Future<void> _saveSaved() async {
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_navSavedKey, [for (final p in navSaved) jsonEncode(p.toJson())]);
   }
 
   Future<void> clearNavRecents() async {

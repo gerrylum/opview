@@ -37,6 +37,25 @@ void main() {
   });
 
   group('AppSettings', () {
+    test('saved places: kept in order, the same spot again renames it, reloaded', () async {
+      SharedPreferences.setMockInitialValues({});
+      final a = AppSettings();
+      await a.load();
+      const gym = Place(name: 'Gym', address: '1 Main', lat: 33.3, lon: -96.9);
+      const cafe = Place(name: 'Cafe', address: '2 Main', lat: 33.4, lon: -96.8);
+      await a.saveNavPlace(gym);
+      await a.saveNavPlace(cafe);
+      await a.saveNavPlace(gym.named('The gym'));
+      expect(a.navSaved.map((p) => p.name), ['The gym', 'Cafe']);
+      await a.renameNavSaved(1, '  Coffee ');
+      await a.renameNavSaved(0, '   ');  // a blank name is ignored
+      final b = AppSettings();
+      await b.load();
+      expect(b.navSaved.map((p) => p.name), ['The gym', 'Coffee']);
+      await b.removeNavSaved(0);
+      expect(b.navSaved.single.name, 'Coffee');
+    });
+
     test('defaults: a 12 hour clock, the speed limit on Auto, Details closed', () {
       final s = AppSettings();
       expect(s.clockMode, ClockMode.h12);
@@ -171,7 +190,8 @@ void main() {
         VoidCallback? onChange,
         SettingsCategory? page = SettingsCategory.comma,
         UIState? uiState,
-        Future<String?> Function(String key)? checkMapKey}) async {
+        Future<String?> Function(String key)? checkMapKey,
+        Future<List<Place>> Function(String query)? findPlaces}) async {
       tester.view.physicalSize = const Size(1920, 1080);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -183,7 +203,7 @@ void main() {
           child: Builder(
             builder: (context) => TextButton(
               onPressed: () => showSettingsDialog(context, settings,
-                  uiState: uiState, host: host, hostIsManual: manual, onChangeHost: onChange, build: 'abc1234', checkMapKey: checkMapKey),
+                  uiState: uiState, host: host, hostIsManual: manual, onChangeHost: onChange, build: 'abc1234', checkMapKey: checkMapKey, findPlaces: findPlaces),
               child: const Text('open'),
             ),
           ),
@@ -307,6 +327,63 @@ void main() {
       final gone = AppSettings();
       await gone.load();
       expect(gone.mapTilerKey, isNull);
+    });
+
+    testWidgets('Navigation: Add place finds an address, names it and keeps it; Rename and Delete', (tester) async {
+      final asked = <String>[];
+      final settings = await open(tester, page: SettingsCategory.navigation, findPlaces: (q) async {
+        asked.add(q);
+        return const [
+          Place(name: '1600 Main St', address: 'Aubrey, TX', lat: 33.30, lon: -96.98),
+          Place(name: '1600 Main St', address: 'Denton, TX', lat: 33.21, lon: -97.13),
+        ];
+      });
+      await tester.ensureVisible(find.byKey(const ValueKey('savedAdd')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('savedAdd')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('savedAddQuery')), '1600 main st aubrey');
+      await tester.tap(find.byKey(const ValueKey('savedAddFind')));
+      await tester.pumpAndSettle();
+      expect(asked, ['1600 main st aubrey']);
+      expect(tester.widget<FilledButton>(find.byKey(const ValueKey('savedAddSave'))).onPressed, isNull);  // nothing picked yet
+      await tester.tap(find.byKey(const ValueKey('savedAddResult_1')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('savedAddName')), 'Gym');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('savedAddSave')));
+      await tester.pumpAndSettle();
+      expect(settings.navSaved.single.name, 'Gym');
+      expect(settings.navSaved.single.address, 'Denton, TX');
+      expect(find.text('Gym'), findsOneWidget);
+
+      await tester.ensureVisible(find.byKey(const ValueKey('savedRename_0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('savedRename_0')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('placeNameField')), 'The gym');
+      await tester.tap(find.byKey(const ValueKey('placeNameSave')));
+      await tester.pumpAndSettle();
+      expect(settings.navSaved.single.name, 'The gym');
+      final again = AppSettings();
+      await again.load();
+      expect(again.navSaved.single.name, 'The gym');
+
+      await tester.tap(find.byKey(const ValueKey('savedDelete_0')));
+      await tester.pumpAndSettle();
+      expect(settings.navSaved, isEmpty);
+    });
+
+    testWidgets('Add place says why nothing came back', (tester) async {
+      await open(tester, page: SettingsCategory.navigation, findPlaces: (q) async => throw StateError('Add a MapTiler key above first'));
+      await tester.ensureVisible(find.byKey(const ValueKey('savedAdd')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('savedAdd')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('savedAddQuery')), 'gym');
+      await tester.tap(find.byKey(const ValueKey('savedAddFind')));
+      await tester.pumpAndSettle();
+      expect(find.text('Add a MapTiler key above first'), findsOneWidget);
     });
 
     testWidgets('Paste puts the clipboard in the key field', (tester) async {
