@@ -174,7 +174,7 @@ void main() {
         final r = await resolveSharedPlace(short,
             client: web({
               short: () => redirect(place),
-              'https://www.google.com/maps/place/United': () => http.Response('<html>loading…</html>', 200),
+              'https://www.google.com/maps/place/United': () => http.Response('<html>loading...</html>', 200),
               'https://maps.google.com/maps?cid=10309681068252561513': () => http.Response(page, 200),
             }, asked: asked));
         expect((r.place!.lat, r.place!.lon), (33.2332013, -96.9736192));
